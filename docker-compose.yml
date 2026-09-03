@@ -1,0 +1,84 @@
+name: zhishu
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: zhishu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-zhishu}
+      POSTGRES_USER: ${POSTGRES_USER:-zhishu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [zhishu]
+
+  excel-agent:
+    build:
+      context: .
+      dockerfile: services/excel-agent/Dockerfile
+    image: zhishu-excel-agent:local
+    container_name: zhishu-excel-agent
+    restart: unless-stopped
+    environment:
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_USERNAME:-opencode}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASSWORD:?请在 .env 中设置 OPENCODE_PASSWORD}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:?请在 .env 中设置 MODEL_BASE_URL}
+      MODEL_API_KEY: ${MODEL_API_KEY:?请在 .env 中设置 MODEL_API_KEY}
+      NO_PROXY: 127.0.0.1,localhost
+      no_proxy: 127.0.0.1,localhost
+    volumes:
+      - ./data/workspaces:/app/services/excel-agent/workspaces
+    networks: [zhishu]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: zhishu-api:local
+    container_name: zhishu-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-zhishu}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-zhishu}?schema=public
+      OPENCODE_BASE_URL: http://excel-agent:4096
+      OPENCODE_USERNAME: ${OPENCODE_USERNAME:-opencode}
+      OPENCODE_PASSWORD: ${OPENCODE_PASSWORD}
+      OPENCODE_WORKDIR: /app/services/excel-agent
+      OPENCODE_HISTORY_MAX_CHARS: ${OPENCODE_HISTORY_MAX_CHARS:-24000}
+      FILE_MAX_SIZE: ${FILE_MAX_SIZE:-104857600}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:?请在 .env 中设置 SEED_ADMIN_EMAIL}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?请在 .env 中设置 SEED_ADMIN_PASSWORD}
+      SEED_TENANT_NAME: ${SEED_TENANT_NAME:-默认租户}
+    volumes:
+      - ./data/workspaces:/app/services/excel-agent/workspaces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      excel-agent:
+        condition: service_started
+    networks: [zhishu]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: zhishu-web:local
+    container_name: zhishu-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-18180}:80"
+    depends_on: [api]
+    networks: [zhishu]
+
+networks:
+  zhishu:
+    driver: bridge

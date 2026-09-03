@@ -1,0 +1,158 @@
+// 智数AI助手 — Prisma schema
+
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+  binaryTargets = ["windows", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model SysTenant {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  deletedAt  DateTime? @map("deleted_at")
+
+  users      SysUser[]
+  sessions   AiSession[]
+  messages   AiMessage[]
+  files      AiFile[]
+  artifacts  AiArtifact[]
+  executions AiExecution[]
+
+  @@map("sys_tenant")
+}
+
+model SysUser {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  email        String?   @unique
+  phone        String?   @unique
+  passwordHash String    @map("password_hash")
+  name         String?
+  role         String    @default("user")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  tenant   SysTenant   @relation(fields: [tenantId], references: [id])
+  sessions AiSession[]
+
+  @@index([tenantId])
+  @@map("sys_user")
+}
+
+model AiSession {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  title             String    @default("新任务")
+  mode              String    @default("operate")
+  opencodeSessionId String?   @unique @map("opencode_session_id")
+  status            String    @default("ACTIVE")
+  categoryPrimary   String?   @map("category_primary")
+  categorySecondary String?   @map("category_secondary")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  tenant     SysTenant     @relation(fields: [tenantId], references: [id])
+  user       SysUser       @relation(fields: [userId], references: [id])
+  messages   AiMessage[]
+  files      AiFile[]
+  artifacts  AiArtifact[]
+  executions AiExecution[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@map("ai_session")
+}
+
+model AiMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  sessionId String   @map("session_id") @db.Uuid
+  role      String
+  content   String
+  status    String   @default("COMPLETED")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant  SysTenant @relation(fields: [tenantId], references: [id])
+  session AiSession @relation(fields: [sessionId], references: [id])
+  files   AiFile[]
+
+  @@index([sessionId])
+  @@index([tenantId])
+  @@map("ai_message")
+}
+
+model AiFile {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  sessionId    String?   @map("session_id") @db.Uuid
+  messageId    String?   @map("message_id") @db.Uuid
+  originalName String    @map("original_name")
+  storedName   String    @map("stored_name")
+  mimeType     String    @map("mime_type")
+  size         BigInt
+  path         String
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  tenant  SysTenant  @relation(fields: [tenantId], references: [id])
+  session AiSession? @relation(fields: [sessionId], references: [id])
+  message AiMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([sessionId])
+  @@index([messageId])
+  @@map("ai_file")
+}
+
+model AiArtifact {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  sessionId    String   @map("session_id") @db.Uuid
+  name         String
+  relativePath String   @map("relative_path")
+  mediaType    String   @map("media_type")
+  size         BigInt
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant  SysTenant @relation(fields: [tenantId], references: [id])
+  session AiSession @relation(fields: [sessionId], references: [id])
+
+  @@unique([sessionId, relativePath])
+  @@index([sessionId])
+  @@index([tenantId])
+  @@map("ai_artifact")
+}
+
+model AiExecution {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  sessionId     String    @map("session_id") @db.Uuid
+  userMessageId String?   @map("user_message_id") @db.Uuid
+  status        String    @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED | ABORTED
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  model         String?
+  inputTokens   Int?      @map("input_tokens")
+  outputTokens  Int?      @map("output_tokens")
+  artifactCount Int       @default(0) @map("artifact_count")
+  errorCode     String?   @map("error_code")
+  errorMessage  String?   @map("error_message")
+
+  tenant  SysTenant @relation(fields: [tenantId], references: [id])
+  session AiSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
+  @@index([tenantId])
+  @@map("ai_execution")
+}

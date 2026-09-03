@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "my-newapi/ds4f-0731-75",
+  "small_model": "my-newapi/ds4f-0731-75",
+  "provider": {
+    "my-newapi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "NewAPI",
+      "options": {
+        "baseURL": "{env:MODEL_BASE_URL}",
+        "apiKey": "{env:MODEL_API_KEY}"
+      },
+      "models": {
+        "ds4f-0731-75": {
+          "name": "ds4f-0731-75"
+        }
+      }
+    }
+  },
+  "skills": {
+    "paths": [".opencode/skills"]
+  },
+  "permission": {
+    "external_directory": "deny"
+  }
+}

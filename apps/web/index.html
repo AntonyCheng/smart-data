@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="左边看数据，右边问 AI —— AI Excel 分析工作台" />
+    <meta property="og:title" content="智数AI助手" />
+    <meta property="og:description" content="用自然语言操作 Excel、做统计分析、生成经营分析报告" />
+    <link rel="icon" href="/favicon.svg" />
+    <title>智数AI助手</title>
+    <script>
+      if (window.location.protocol === 'file:') {
+        window.location.replace('http://localhost:3001/');
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
