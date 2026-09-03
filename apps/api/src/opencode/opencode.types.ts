@@ -11,6 +11,22 @@ export interface OpenCodeSession {
   [key: string]: unknown;
 }
 
+/**
+ * 单条会话级权限规则（OpenCode `POST /session` 的 `permission` 字段）。
+ * OpenCode 把它追加到 agent 的权限列表后按「后匹配优先」求值，
+ * 用来把某个会话的文件访问锁死在自己的工作区目录内。
+ */
+export interface OpenCodePermissionRule {
+  permission: string;
+  pattern: string;
+  action: 'ask' | 'allow' | 'deny';
+}
+
+export interface OpenCodeCreateSessionOptions {
+  title?: string;
+  permission?: OpenCodePermissionRule[];
+}
+
 export interface OpenCodeAgent {
   name: string;
   mode?: string;

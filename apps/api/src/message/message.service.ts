@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { OpenCodeService } from '../opencode/opencode.service';
 import { IdentityService } from '../common/identity.service';
+import { WorkspaceService } from '../common/workspace.service';
 import { SseHub } from '../session/sse-hub';
 import { SessionEventWatcher } from '../session/session-event-watcher';
 import { FileService, PromptDocument } from '../file/file.service';
@@ -59,6 +60,7 @@ export class MessageService {
     private readonly sse: SseHub,
     private readonly watcher: SessionEventWatcher,
     private readonly files: FileService,
+    private readonly workspace: WorkspaceService,
   ) {}
 
   /** 接受(202) + 创建用户消息 + 执行记录，触发 prompt_async。 */
@@ -205,7 +207,9 @@ export class MessageService {
       `【任务工作区】本任务的所有路径都相对 OpenCode 工作目录：\n` +
       `- 输入文件目录：${relBase}/input/（只读，禁止修改或删除）\n` +
       `- 成果输出目录：${relBase}/output/tables/、${relBase}/output/charts/、${relBase}/output/reports/\n` +
-      `所有 Python 脚本的读写路径、以及下文提到的 <工作区> 一律替换为 ${relBase}。不要使用 ./input 或 ./output 这类相对当前目录的写法。`;
+      `所有 Python 脚本的读写路径、以及下文提到的 <工作区> 一律替换为 ${relBase}。不要使用 ./input 或 ./output 这类相对当前目录的写法。\n` +
+      `只允许访问 ${relBase}/ 目录内的文件。严禁读取、遍历、grep 或 glob workspaces/ 下的其他任何目录，` +
+      `严禁在 Python 脚本里用 open()/os.walk()/glob 访问 ${relBase}/ 之外的路径 —— 其它目录属于别的任务，与本任务无关。`;
 
     const parts: string[] = [];
     if (context?.file) parts.push(`文件：${context.file}`);
@@ -325,11 +329,45 @@ export class MessageService {
     if (!exec) return { status: 'idle' };
     if (session.opencodeSessionId) {
       await this.opencode.abortSession(session.opencodeSessionId).catch(() => undefined);
+      // 让事件监听器不再为这条已中止的执行做 finalize（避免把 ABORTED 覆盖成
+      // COMPLETED、或补一条残缺答复）。
+      this.watcher.unregister(session.opencodeSessionId);
     }
     await this.prisma.aiExecution.update({
       where: { id: exec.id },
       data: { status: ExecutionStatus.ABORTED, completedAt: new Date(), errorCode: 'AGENT_ABORTED', errorMessage: '用户中止' },
     });
+    // 中止后用户消息会成为没有答复的孤儿轮次，历史注入时也会带上它。
+    // 补一条简短的助手占位消息，让会话记录保持成对；若 finalize 抢先落库了
+    // 真实答复则跳过。
+    if (exec.userMessageId) {
+      const userMessage = await this.prisma.aiMessage.findFirst({
+        where: { id: exec.userMessageId, sessionId: session.id, role: 'user' },
+        select: { createdAt: true },
+      });
+      const alreadyAnswered = userMessage
+        ? await this.prisma.aiMessage.findFirst({
+            where: {
+              sessionId: session.id,
+              tenantId: session.tenantId,
+              role: 'assistant',
+              createdAt: { gt: userMessage.createdAt },
+            },
+            select: { id: true },
+          })
+        : null;
+      if (userMessage && !alreadyAnswered) {
+        await this.prisma.aiMessage.create({
+          data: {
+            tenantId: session.tenantId,
+            sessionId: session.id,
+            role: 'assistant',
+            content: '（本轮回答已被你停止）',
+            status: 'ABORTED',
+          },
+        });
+      }
+    }
     this.sse.publish(session.id, 'agent.error', { code: 'AGENT_ABORTED', message: '已停止' });
     this.sse.clearExecution(session.id);
     return { status: 'aborted' };
@@ -424,7 +462,10 @@ export class MessageService {
 
     let created: Awaited<ReturnType<OpenCodeService['createSession']>>;
     try {
-      created = await this.opencode.createSession(session.title);
+      created = await this.opencode.createSession({
+        title: session.title,
+        permission: this.workspace.sessionPermissionRuleset(session.tenantId, session.id),
+      });
     } catch (err) {
       this.logger.error(`OpenCode session creation failed: ${err instanceof Error ? err.message : String(err)}`);
       throw this.toRuntimeApiError(err);

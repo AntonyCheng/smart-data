@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OpenCodeService } from '../opencode/opencode.service';
 import { IdentityService } from '../common/identity.service';
+import { WorkspaceService } from '../common/workspace.service';
 import { ApiError, ApiErrorCode, ExecutionStatus } from '../common/errors';
 import { SessionView } from './session.types';
 import { inferAnalysisCategory } from './analysis-category';
@@ -18,6 +19,7 @@ export class SessionService {
     private readonly prisma: PrismaService,
     private readonly opencode: OpenCodeService,
     private readonly identity: IdentityService,
+    private readonly workspace: WorkspaceService,
   ) {}
 
   /** 创建业务会话 → OpenCode 会话 → 保存映射（opencode id 永不返回前端）。 */
@@ -33,7 +35,10 @@ export class SessionService {
       },
     });
     try {
-      const oc = await this.opencode.createSession(row.title);
+      const oc = await this.opencode.createSession({
+        title: row.title,
+        permission: this.workspace.sessionPermissionRuleset(tenantId, row.id),
+      });
       const updated = await this.prisma.aiSession.update({
         where: { id: row.id },
         data: { opencodeSessionId: oc.id, status: 'ACTIVE' },
@@ -88,13 +93,14 @@ export class SessionService {
     return this.toView(updated, await this.isRunning(updated.id));
   }
 
-  /** DB 软删除；OpenCode 尽力删除。 */
+  /** DB 软删除；OpenCode 尽力删除；清理磁盘上的工作区目录。 */
   async remove(id: string): Promise<void> {
     const row = await this.findOwned(id);
     await this.prisma.aiSession.update({ where: { id: row.id }, data: { deletedAt: new Date() } });
     if (row.opencodeSessionId) {
       await this.opencode.deleteSession(row.opencodeSessionId).catch(() => undefined);
     }
+    this.workspace.removeSessionWorkspace(row.tenantId, row.id);
   }
 
   private async findOwned(id: string) {

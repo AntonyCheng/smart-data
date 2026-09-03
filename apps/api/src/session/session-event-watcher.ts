@@ -237,6 +237,15 @@ export class SessionEventWatcher implements OnModuleInit, OnModuleDestroy {
 
   private async finalize(ocSid: string, exec: TrackedExecution): Promise<void> {
     try {
+      // 竞态保护：用户中止后 session.idle 仍可能到达；若执行已被置为终态
+      // （ABORTED / FAILED / COMPLETED），不要再覆盖状态或补落答复。
+      const current = await this.prisma.aiExecution.findUnique({
+        where: { id: exec.executionId },
+        select: { status: true },
+      });
+      if (current && current.status !== ExecutionStatus.RUNNING && current.status !== ExecutionStatus.PENDING) {
+        return;
+      }
       const msgs = await this.opencode.getMessages(ocSid);
       let last: { info: { role?: string; error?: unknown; tokens?: { input?: number; output?: number }; modelID?: string }; parts?: Array<{ type: string; text?: string }> } | undefined;
       for (let i = msgs.length - 1; i >= 0; i--) {

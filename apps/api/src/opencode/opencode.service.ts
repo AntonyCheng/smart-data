@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OpenCodeClient } from './opencode.client';
 import {
   OpenCodeAgent,
+  OpenCodeCreateSessionOptions,
   OpenCodeEvent,
   OpenCodeHealth,
   OpenCodeMcpAddPayload,
@@ -45,11 +46,24 @@ export class OpenCodeService {
     });
   }
 
-  /** POST /session */
-  createSession(title?: string): Promise<OpenCodeSession> {
+  /**
+   * POST /session
+   *
+   * `permission`（可选）是会话级权限规则，OpenCode 会把它追加到 agent 权限
+   * 之后按「后匹配优先」求值 —— 用来把该会话的 read/edit/glob 等文件工具
+   * 锁死在它自己的工作区目录内，防止跨会话/跨租户访问。
+   */
+  createSession(
+    titleOrOptions?: string | OpenCodeCreateSessionOptions,
+  ): Promise<OpenCodeSession> {
+    const options: OpenCodeCreateSessionOptions =
+      typeof titleOrOptions === 'string' ? { title: titleOrOptions } : titleOrOptions ?? {};
+    const body: Record<string, unknown> = {};
+    if (options.title) body.title = options.title;
+    if (options.permission?.length) body.permission = options.permission;
     return this.client.request<OpenCodeSession>('/session', {
       method: 'POST',
-      body: title ? { title } : {},
+      body,
     });
   }
 
