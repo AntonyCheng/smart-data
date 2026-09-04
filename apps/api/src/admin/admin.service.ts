@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
-import * as fs from 'node:fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { IdentityService } from '../common/identity.service';
 import { ApiError, ApiErrorCode, ExecutionStatus } from '../common/errors';
@@ -146,7 +145,7 @@ export class AdminService {
       if (session.opencodeSessionId) {
         await this.opencode.deleteSession(session.opencodeSessionId).catch(() => undefined);
       }
-      fs.rmSync(this.workspace.sessionRoot(tenantId, session.id), { recursive: true, force: true });
+      this.workspace.removeSessionWorkspace(tenantId, session.id);
     }
   }
 

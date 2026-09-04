@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
@@ -59,7 +61,13 @@ import {
   type UploadedFile,
   type WorkbookSnapshot,
 } from './lib/api';
-import { UniverViewer, type SheetSelection } from './components/UniverViewer';
+import type { SheetSelection } from './components/UniverViewer';
+
+// Univer 及其 @univerjs/* 依赖树约 1.7 MB gzip，是首屏包的最大来源。
+// 拆成独立 chunk，只在真正打开表格时才下载，登录页/管理后台不受牵连。
+const UniverViewer = lazy(() =>
+  import('./components/UniverViewer').then((m) => ({ default: m.UniverViewer })),
+);
 import {
   FEATURED_COMMANDS,
   QUICK_COMMANDS,
@@ -493,8 +501,8 @@ function LoginScreen({
               {mode === 'login' ? (
                 <>
                   <label>
-                    <span>手机号或邮箱</span>
-                    <input autoComplete="username" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="请输入手机号或邮箱" />
+                    <span>账号</span>
+                    <input autoComplete="username" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="手机号、邮箱或管理员账号" />
                   </label>
                   <label>
                     <span>密码</span>
@@ -1508,7 +1516,9 @@ export default function ZhishuApp() {
                   workbook ? (
                     <>
                       {workbook.truncated && <div className="data-truncated"><TriangleAlert size={14} />工作簿较大，仅预览部分行列；AI 分析仍基于完整文件。</div>}
-                      <UniverViewer workbook={workbook} onSelectionChange={setSelection} />
+                      <Suspense fallback={<div className="data-state"><LoaderCircle className="spin" size={20} />正在加载表格组件</div>}>
+                        <UniverViewer workbook={workbook} onSelectionChange={setSelection} />
+                      </Suspense>
                     </>
                   ) : workbookLoading ? (
                     <div className="data-state"><LoaderCircle className="spin" size={20} />正在解析工作簿</div>
