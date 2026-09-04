@@ -26,3 +26,4 @@ services/excel-agent/.opencode/node_modules/
 services/excel-agent/.opencode/package.json
 services/excel-agent/.opencode/package-lock.json
 services/excel-agent/.opencode/bun.lock
+.idea/
