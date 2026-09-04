@@ -93,7 +93,7 @@ export class SessionService {
     return this.toView(updated, await this.isRunning(updated.id));
   }
 
-  /** DB 软删除；OpenCode 尽力删除；清理磁盘上的工作区目录。 */
+  /** DB 软删除；OpenCode 尽力删除；清理磁盘工作区与已失效的成果记录。 */
   async remove(id: string): Promise<void> {
     const row = await this.findOwned(id);
     await this.prisma.aiSession.update({ where: { id: row.id }, data: { deletedAt: new Date() } });
@@ -101,6 +101,8 @@ export class SessionService {
       await this.opencode.deleteSession(row.opencodeSessionId).catch(() => undefined);
     }
     this.workspace.removeSessionWorkspace(row.tenantId, row.id);
+    // 成果文件已随工作区目录删除，对应的成果记录也一并清掉（无恢复路径）。
+    await this.prisma.aiArtifact.deleteMany({ where: { sessionId: row.id } }).catch(() => undefined);
   }
 
   private async findOwned(id: string) {

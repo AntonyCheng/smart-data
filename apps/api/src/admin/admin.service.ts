@@ -176,15 +176,25 @@ export class AdminService {
         },
       }),
       this.prisma.aiExecution.aggregate({
-        where: { tenantId, status: ExecutionStatus.COMPLETED },
+        where: { tenantId, status: ExecutionStatus.COMPLETED, session: { deletedAt: null } },
         _sum: { inputTokens: true, outputTokens: true, artifactCount: true },
       }),
       this.prisma.aiExecution.aggregate({
-        where: { tenantId, status: ExecutionStatus.COMPLETED, completedAt: { gte: startOfDay } },
+        where: {
+          tenantId,
+          status: ExecutionStatus.COMPLETED,
+          completedAt: { gte: startOfDay },
+          session: { deletedAt: null },
+        },
         _sum: { inputTokens: true, outputTokens: true, artifactCount: true },
       }),
       this.prisma.aiExecution.findMany({
-        where: { tenantId, status: ExecutionStatus.COMPLETED, completedAt: { gte: startOfTrend } },
+        where: {
+          tenantId,
+          status: ExecutionStatus.COMPLETED,
+          completedAt: { gte: startOfTrend },
+          session: { deletedAt: null },
+        },
         select: { completedAt: true, inputTokens: true, outputTokens: true },
         orderBy: { completedAt: 'asc' },
       }),
@@ -192,7 +202,7 @@ export class AdminService {
         where: { tenantId, role: 'user', createdAt: { gte: startOfTrend }, session: { deletedAt: null } },
         select: { createdAt: true, session: { select: { userId: true } } },
       }),
-      this.prisma.aiArtifact.count({ where: { tenantId } }),
+      this.prisma.aiArtifact.count({ where: { tenantId, session: { deletedAt: null } } }),
     ]);
 
     const categoryCounts = new Map<string, number>();
