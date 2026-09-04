@@ -502,7 +502,7 @@ function LoginScreen({
                 <>
                   <label>
                     <span>账号</span>
-                    <input autoComplete="username" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="手机号、邮箱或管理员账号" />
+                    <input autoComplete="username" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="请输入账号" />
                   </label>
                   <label>
                     <span>密码</span>
