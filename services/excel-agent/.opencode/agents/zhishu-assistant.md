@@ -1,6 +1,7 @@
 ---
 description: 使用 huashu-excel 对当前任务工作区内的 Excel 执行数据操作、统计分析并生成成果文件。
 mode: primary
+steps: 120
 permission:
   read: allow
   glob: allow

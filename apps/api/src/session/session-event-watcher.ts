@@ -14,17 +14,22 @@ import {
   stripTranslationPreamble,
 } from '../message/assistant-output.util';
 
+type SessionMode = 'operate' | 'report';
+
 interface TrackedExecution {
   businessSessionId: string;
   tenantId: string;
   executionId: string;
   opencodeSessionId: string;
+  mode: SessionMode;
   started: boolean;
   startedAt?: number;
   /** 最近一次收到本会话 OpenCode 事件的时间戳，用于看门狗判定卡死。 */
   lastEventAt: number;
   registeredAt: number;
   timedOut: boolean;
+  /** 本轮已发起的工具调用数，用于步数上限（弱模型钻牛角尖时会无限循环）。 */
+  toolCalls: number;
   toolCallIds: Set<string>;
 }
 
@@ -38,6 +43,18 @@ const STALL_TIMEOUT_MS = num('AGENT_STALL_TIMEOUT_MS', 4 * 60_000);
 /** agent 迟迟不开工（prompt_async 已受理但 OpenCode 无 busy 事件）多久判为失败。 */
 const START_TIMEOUT_MS = num('AGENT_START_TIMEOUT_MS', 2.5 * 60_000);
 const WATCHDOG_INTERVAL_MS = num('AGENT_WATCHDOG_INTERVAL_MS', 30_000);
+
+/**
+ * 工具调用步数上限。ds4f-0731-75 在报告模式偶尔钻牛角尖（比如手搓 DOCX XML
+ * 反复失败重试），看门狗因为一直有事件而不触发。正常 operate 通常 <15 步、
+ * report 30~45 步，这里留 2x 余量兜底。
+ */
+const OPERATE_STEP_LIMIT = num('AGENT_OPERATE_STEP_LIMIT', 35);
+const REPORT_STEP_LIMIT = num('AGENT_REPORT_STEP_LIMIT', 90);
+
+/** OpenCode 因权限规则拒绝某次工具调用时返回的固定话术片段。 */
+const PERMISSION_DENIED_RE =
+  /rule which prevents you from using|permission denied|not allowed to (?:run|use)|is not permitted/i;
 
 interface MessageState {
   role?: string;
@@ -101,17 +118,25 @@ export class SessionEventWatcher implements OnModuleInit, OnModuleDestroy {
     this.cancel?.();
   }
 
-  register(opencodeSessionId: string, businessSessionId: string, executionId: string, tenantId: string): void {
+  register(
+    opencodeSessionId: string,
+    businessSessionId: string,
+    executionId: string,
+    tenantId: string,
+    mode: SessionMode = 'operate',
+  ): void {
     const now = Date.now();
     this.executions.set(opencodeSessionId, {
       businessSessionId,
       tenantId,
       executionId,
       opencodeSessionId,
+      mode,
       started: false,
       lastEventAt: now,
       registeredAt: now,
       timedOut: false,
+      toolCalls: 0,
       toolCallIds: new Set(),
     });
   }
@@ -154,7 +179,9 @@ export class SessionEventWatcher implements OnModuleInit, OnModuleDestroy {
         } else if (part.type === 'tool') {
           st.hasTool = true;
           st.buffers.clear();
-          const state = part.state as { status?: string; input?: unknown } | undefined;
+          const state = part.state as
+            | { status?: string; input?: unknown; output?: unknown; error?: unknown }
+            | undefined;
           const status = state?.status ?? '';
           const callID = (part.callID as string) ?? '';
           const tool = String(part.tool ?? 'tool');
@@ -171,22 +198,47 @@ export class SessionEventWatcher implements OnModuleInit, OnModuleDestroy {
               this.seenToolCalls.add(callID);
               this.toolStartedAt.set(callID, Date.now());
             }
+            exec.toolCalls += 1;
             this.sse.publish(exec.businessSessionId, isSkill ? 'skill.started' : 'tool.started', {
               name,
               ...(detail ? { detail } : {}),
             });
+            const limit = exec.mode === 'report' ? REPORT_STEP_LIMIT : OPERATE_STEP_LIMIT;
+            if (exec.toolCalls > limit) {
+              exec.timedOut = true;
+              this.logger.warn(
+                `watchdog: 执行 ${exec.executionId} 工具调用超过 ${limit} 步（${exec.mode}），中止`,
+              );
+              await this.failExecution(
+                ocSid,
+                exec,
+                'AGENT_STEP_LIMIT',
+                '本次处理步骤过多（可能模型陷入反复重试），已终止。可尝试拆分需求或稍后重试。',
+              );
+            }
           } else if (
             (status === 'completed' || status === 'error')
             && (!callID || !this.finishedToolCalls.has(callID))
           ) {
             if (callID) this.finishedToolCalls.add(callID);
             const startedAt = callID ? this.toolStartedAt.get(callID) : undefined;
-            this.sse.publish(exec.businessSessionId, isSkill ? 'skill.completed' : 'tool.completed', {
-              name,
-              ok: status === 'completed',
-              ...(detail ? { detail } : {}),
-              ...(startedAt ? { durationMs: Date.now() - startedAt } : {}),
-            });
+            const resultText = `${this.stringify(state?.output)} ${this.stringify(state?.error)}`;
+            const denied = status === 'error' && PERMISSION_DENIED_RE.test(resultText);
+            if (denied) {
+              // 沙箱按规则拦下了模型的越权/探查动作 —— 这是护栏在生效，不是任务失败，
+              // 前端把对应的“正在执行”步骤悄悄撤掉，不显示成红叉。
+              this.sse.publish(exec.businessSessionId, 'tool.dropped', {
+                name,
+                ...(detail ? { detail } : {}),
+              });
+            } else {
+              this.sse.publish(exec.businessSessionId, isSkill ? 'skill.completed' : 'tool.completed', {
+                name,
+                ok: status === 'completed',
+                ...(detail ? { detail } : {}),
+                ...(startedAt ? { durationMs: Date.now() - startedAt } : {}),
+              });
+            }
           }
         } else if (part.type === 'step-finish' && part.reason === 'stop') {
           this.flushText(ocSid, mid, exec);
@@ -360,30 +412,49 @@ export class SessionEventWatcher implements OnModuleInit, OnModuleDestroy {
         ? `agent 持续 ${Math.round(idleFor / 1000)}s 无响应`
         : `agent 超过 ${Math.round((now - exec.registeredAt) / 1000)}s 未开工`;
       this.logger.warn(`watchdog: 中止卡死执行 ${exec.executionId}（${reason}）`);
-      await this.failStalledExecution(ocSid, exec);
+      await this.failExecution(
+        ocSid,
+        exec,
+        'AGENT_TIMEOUT',
+        'AI 长时间无响应（可能是模型服务超时），本次已终止，请重试',
+      );
     }
   }
 
-  private async failStalledExecution(ocSid: string, exec: TrackedExecution): Promise<void> {
+  /** 中止 OpenCode 会话、把执行判失败、推 agent.error、清理跟踪状态。 */
+  private async failExecution(
+    ocSid: string,
+    exec: TrackedExecution,
+    errorCode: string,
+    message: string,
+  ): Promise<void> {
+    if (this.executions.get(ocSid) !== exec) return; // 已被清理/并发处理
     try {
       await this.opencode.abortSession(ocSid).catch(() => undefined);
       await this.prisma.aiExecution.update({
         where: { id: exec.executionId },
         data: {
           status: ExecutionStatus.FAILED,
-          errorCode: 'AGENT_TIMEOUT',
-          errorMessage: 'AI 长时间无响应（可能是模型服务超时），本次已终止，请重试',
+          errorCode,
+          errorMessage: message,
           completedAt: new Date(),
         },
       }).catch((cause) => {
-        this.logger.error(`watchdog: 标记执行失败出错 ${exec.executionId}: ${(cause as Error).message}`);
+        this.logger.error(`标记执行失败出错 ${exec.executionId}: ${(cause as Error).message}`);
       });
-      this.sse.publish(exec.businessSessionId, 'agent.error', {
-        code: 'AGENT_TIMEOUT',
-        message: 'AI 长时间无响应（可能是模型服务超时），本次已终止，请重试',
-      });
+      this.sse.publish(exec.businessSessionId, 'agent.error', { code: errorCode, message });
     } finally {
       this.cleanupExecution(ocSid, exec);
+    }
+  }
+
+  private stringify(value: unknown): string {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
     }
   }
 

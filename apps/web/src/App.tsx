@@ -938,6 +938,17 @@ export default function ZhishuApp() {
     setCurrentProcess([...items, { id: `process-${processSequenceRef.current}`, ...next }].slice(-20));
   }
 
+  function dropRunningProcess(key: string) {
+    const items = [...processRef.current];
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      if (items[index]?.key === key && items[index]?.status === 'running') {
+        items.splice(index, 1);
+        setCurrentProcess(items);
+        return;
+      }
+    }
+  }
+
   function markSessionRunning(sessionId: string, isRunning: boolean) {
     setSessions((rows) => rows.map((session) => (session.id === sessionId ? { ...session, running: isRunning } : session)));
   }
@@ -1013,6 +1024,15 @@ export default function ZhishuApp() {
 
     const onEvent = (event: RuntimeEvent) => {
       if (event.sessionId !== currentSessionRef.current) return;
+
+      if (event.type === 'tool.dropped') {
+        // 沙箱按规则拦下了模型的越权/探查动作 —— 撤掉对应的“正在执行”步骤，不显示成错误。
+        const rawName = typeof event.data.name === 'string' ? event.data.name : '专业工具';
+        const detail = typeof event.data.detail === 'string' ? event.data.detail : '';
+        dropRunningProcess(`tool:${rawName}:${detail}`);
+        return;
+      }
+
       const process = processLabel(event);
       if (process) appendProcess(process);
 

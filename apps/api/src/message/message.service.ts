@@ -121,7 +121,7 @@ export class MessageService {
       },
     });
 
-    this.watcher.register(runtime.id, session.id, executionId, session.tenantId);
+    this.watcher.register(runtime.id, session.id, executionId, session.tenantId, nextMode);
     this.sse.registerExecution(session.id, executionId);
 
     const relBase = `workspaces/${session.tenantId}/${session.id}`;
@@ -138,7 +138,7 @@ export class MessageService {
         let recovered: string | undefined;
         try {
           recovered = await this.recreateRuntimeSession(session, runtime.id);
-          this.watcher.register(recovered, session.id, executionId, session.tenantId);
+          this.watcher.register(recovered, session.id, executionId, session.tenantId, nextMode);
           await this.opencode.sendPromptAsync(recovered, {
             ...promptPayload,
             parts: [{ type: 'text', text: this.buildPrompt(content.trim(), documents, history, nextMode, context, relBase) }],
