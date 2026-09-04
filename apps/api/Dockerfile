@@ -5,7 +5,8 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_FETCH_RETRIES=5 \
     NPM_CONFIG_FETCH_TIMEOUT=120000 \
     PRISMA_ENGINES_MIRROR=https://registry.npmmirror.com/-/binary/prisma
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
@@ -28,7 +29,8 @@ ENV NODE_ENV=production \
     PORT=3000 \
     OPENCODE_WORKDIR=/app/services/excel-agent
 
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # npm workspaces 未把依赖全部提升到根 node_modules，两处都要带上
