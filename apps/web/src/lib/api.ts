@@ -112,12 +112,15 @@ export interface UploadedFile {
   createdAt: string;
 }
 
+export type ArtifactKind = 'report' | 'workbook' | 'table' | 'chart' | 'other';
+
 export interface Artifact {
   id: string;
   name: string;
   relativePath: string;
   mediaType: string;
   size: number;
+  kind: ArtifactKind;
   createdAt: string;
 }
 

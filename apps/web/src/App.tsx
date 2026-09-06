@@ -31,6 +31,7 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
+  Package,
   Paperclip,
   Plus,
   Search,
@@ -55,6 +56,7 @@ import {
   type AdminStats,
   type AdminUser,
   type Artifact,
+  type ArtifactKind,
   type AuthUser,
   type RuntimeEvent,
   type SessionMode,
@@ -876,6 +878,8 @@ export default function ZhishuApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifactDrawerOpen, setArtifactDrawerOpen] = useState(false);
+  const [completionNote, setCompletionNote] = useState<{ id: string; name: string; kind: ArtifactKind } | null>(null);
   const [tabs, setTabs] = useState<DataTab[]>([]);
   const [activeTabKey, setActiveTabKey] = useState<string | null>(null);
   const [loadedWorkbook, setLoadedWorkbook] = useState<LoadedWorkbook | null>(null);
@@ -906,6 +910,8 @@ export default function ZhishuApp() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const artifactsRef = useRef<Artifact[]>([]);
+  useEffect(() => { artifactsRef.current = artifacts; }, [artifacts]);
 
   const currentSession = sessions.find((session) => session.id === currentSessionId) ?? null;
   const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
@@ -975,9 +981,10 @@ export default function ZhishuApp() {
     return rows;
   }
 
-  async function refreshArtifacts(sessionId: string) {
+  async function refreshArtifacts(sessionId: string): Promise<Artifact[]> {
     const nextArtifacts = await api.artifacts.list(sessionId);
     if (currentSessionRef.current === sessionId) setArtifacts(nextArtifacts);
+    return nextArtifacts;
   }
 
   function openTab(tab: DataTab) {
@@ -1056,15 +1063,25 @@ export default function ZhishuApp() {
       if (event.type === 'artifact') {
         const artifact = event.data as unknown as Artifact;
         setArtifacts((current) => current.some((a) => a.id === artifact.id) ? current.map((a) => a.id === artifact.id ? artifact : a) : [artifact, ...current]);
-        openTab({ kind: 'artifact', item: artifact });
       }
       if (event.type === 'agent.completed') {
         markSessionRunning(event.sessionId, false);
         setRunning(false);
         const messageId = typeof event.data.messageId === 'string' ? event.data.messageId : '';
         if (messageId) setProcessArchive((archive) => ({ ...archive, [messageId]: [...processRef.current] }));
+        const knownArtifactIds = new Set(artifactsRef.current.map((a) => a.id));
         void Promise.all([refreshMessages(event.sessionId), refreshSessions(), refreshArtifacts(event.sessionId)])
-          .then(() => { setLiveMarkdown(''); setCurrentProcess([]); })
+          .then(([, , nextArtifacts]) => {
+            setLiveMarkdown('');
+            setCurrentProcess([]);
+            // 本轮结束后只自动打开一个主交付物：优先报告，其次处理后的工作簿；图表 / 数据表进「成果」抽屉。
+            const fresh = nextArtifacts.filter((a) => !knownArtifactIds.has(a.id));
+            const primary = pickPrimaryArtifact(fresh);
+            if (primary) {
+              openTab({ kind: 'artifact', item: primary });
+              setCompletionNote({ id: primary.id, name: primary.name, kind: primary.kind });
+            }
+          })
           .catch(() => undefined);
       }
       if (event.type === 'agent.error') {
@@ -1095,6 +1112,8 @@ export default function ZhishuApp() {
     setCurrentProcess([]);
     setTabs([]);
     setActiveTabKey(null);
+    setArtifactDrawerOpen(false);
+    setCompletionNote(null);
     setLoadedWorkbook(null);
     setRunning(Boolean(sessions.find((s) => s.id === sessionId)?.running));
     try {
@@ -1128,6 +1147,8 @@ export default function ZhishuApp() {
     setMessages([]);
     setFiles([]);
     setArtifacts([]);
+    setArtifactDrawerOpen(false);
+    setCompletionNote(null);
     setTabs([]);
     setActiveTabKey(null);
     setLoadedWorkbook(null);
@@ -1147,6 +1168,8 @@ export default function ZhishuApp() {
     setMessages([]);
     setFiles([]);
     setArtifacts([]);
+    setArtifactDrawerOpen(false);
+    setCompletionNote(null);
     setTabs([]);
     setActiveTabKey(null);
     await connectStream(session.id);
@@ -1481,28 +1504,60 @@ export default function ZhishuApp() {
           <PanelGroup direction="horizontal" className="workbench">
             <Panel defaultSize={58} minSize={30} className="data-pane">
               <div className="data-tabs">
-                <button type="button" className="mobile-menu" aria-label="打开历史任务" onClick={() => setSidebarOpen(true)}><Menu size={19} /></button>
-                {tabs.map((tab) => {
-                  const key = tabKey(tab);
-                  return (
-                    <button key={key} className={`data-tab ${key === activeTabKey ? 'active' : ''} ${tab.kind === 'artifact' ? 'artifact' : ''}`} onClick={() => setActiveTabKey(key)}>
-                      {tab.kind === 'artifact' ? <FileText size={14} /> : <FileSpreadsheet size={14} />}
-                      <span>{tab.item.name}</span>
-                      <small>{tab.kind === 'file' ? '输入' : '成果'}</small>
-                      <X size={13} onClick={(e) => { e.stopPropagation(); closeTab(key); }} />
+                <div className="data-tabs-scroll">
+                  <button type="button" className="mobile-menu" aria-label="打开历史任务" onClick={() => setSidebarOpen(true)}><Menu size={19} /></button>
+                  {tabs.map((tab) => {
+                    const key = tabKey(tab);
+                    return (
+                      <button key={key} className={`data-tab ${key === activeTabKey ? 'active' : ''} ${tab.kind === 'artifact' ? 'artifact' : ''}`} onClick={() => setActiveTabKey(key)}>
+                        {tab.kind === 'artifact' ? <FileText size={14} /> : <FileSpreadsheet size={14} />}
+                        <span>{tab.item.name}</span>
+                        <small>{tab.kind === 'file' ? '输入' : '成果'}</small>
+                        <X size={13} onClick={(e) => { e.stopPropagation(); closeTab(key); }} />
+                      </button>
+                    );
+                  })}
+                  {tabs.length === 0 && <span className="data-tab-placeholder"><LayoutGrid size={14} /> 数据工作区</span>}
+                </div>
+                <div className="data-tabs-actions">
+                  {(artifacts.length > 0 || files.length > 0) && (
+                    <button
+                      type="button"
+                      className={`data-tabs-btn ${artifactDrawerOpen ? 'active' : ''}`}
+                      onClick={() => setArtifactDrawerOpen((v) => !v)}
+                    >
+                      <Package size={14} />成果
+                      {artifacts.length > 0 && <small>{artifacts.length}</small>}
                     </button>
-                  );
-                })}
-                {tabs.length === 0 && <span className="data-tab-placeholder"><LayoutGrid size={14} /> 数据工作区</span>}
-                <label className="data-upload">
-                  <input ref={fileInputRef} type="file" accept=".xlsx,.xlsm,.xltx,.xltm" multiple hidden onChange={(event) => void uploadFiles(event)} />
-                  <span onClick={() => fileInputRef.current?.click()}>
-                    {uploading ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}上传 Excel
-                  </span>
-                </label>
+                  )}
+                  <label className="data-upload">
+                    <input ref={fileInputRef} type="file" accept=".xlsx,.xlsm,.xltx,.xltm" multiple hidden onChange={(event) => void uploadFiles(event)} />
+                    <span onClick={() => fileInputRef.current?.click()}>
+                      {uploading ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}上传 Excel
+                    </span>
+                  </label>
+                </div>
               </div>
 
               <div className="data-content">
+                {completionNote && (
+                  <div className="completion-note">
+                    <CircleCheck size={15} />
+                    <span>{completionNote.kind === 'report' ? '分析报告已生成' : '处理后的工作簿已生成'}：{completionNote.name}</span>
+                    <button
+                      type="button"
+                      className="completion-note-open"
+                      onClick={() => {
+                        const item = artifacts.find((a) => a.id === completionNote.id);
+                        if (item) openTab({ kind: 'artifact', item });
+                        setCompletionNote(null);
+                      }}
+                    >
+                      {completionNote.kind === 'report' ? '打开报告' : '打开工作簿'}
+                    </button>
+                    <button type="button" className="completion-note-close" aria-label="关闭" onClick={() => setCompletionNote(null)}><X size={13} /></button>
+                  </div>
+                )}
                 {!activeTab ? (
                   <div className="data-empty">
                     <div className="data-empty-icon"><FileSpreadsheet size={30} /></div>
@@ -1532,29 +1587,17 @@ export default function ZhishuApp() {
                 )}
               </div>
 
-              <div className="data-footer">
-                <div className="data-lists">
-                  <div className="data-list">
-                    <span className="data-list-label"><FileSpreadsheet size={13} /> 输入文件 {files.length}</span>
-                    {files.map((file) => (
-                      <span key={file.id} className={`data-chip ${activeTab?.kind === 'file' && activeTab.item.id === file.id ? 'active' : ''}`}>
-                        <button type="button" onClick={() => openTab({ kind: 'file', item: file })}>{file.name}<small>{formatFileSize(file.size)}</small></button>
-                        <X size={12} onClick={() => void removeFile(file)} />
-                      </span>
-                    ))}
-                  </div>
-                  <div className="data-list">
-                    <span className="data-list-label"><FileText size={13} /> 分析成果 {artifacts.length}</span>
-                    {artifacts.map((artifact) => (
-                      <span key={artifact.id} className={`data-chip artifact ${activeTab?.kind === 'artifact' && activeTab.item.id === artifact.id ? 'active' : ''}`}>
-                        <button type="button" onClick={() => openTab({ kind: 'artifact', item: artifact })}>{artifact.name}<small>{formatFileSize(artifact.size)}</small></button>
-                        <Download size={12} onClick={() => void downloadArtifact(artifact)} />
-
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {artifactDrawerOpen && (
+                <ArtifactDrawer
+                  artifacts={artifacts}
+                  files={files}
+                  activeId={activeTab ? activeTab.item.id : null}
+                  onClose={() => setArtifactDrawerOpen(false)}
+                  onOpenArtifact={(artifact) => openTab({ kind: 'artifact', item: artifact })}
+                  onOpenFile={(file) => openTab({ kind: 'file', item: file })}
+                  onRemoveFile={(file) => void removeFile(file)}
+                />
+              )}
             </Panel>
 
             <PanelResizeHandle className="resize-handle" />
@@ -1708,9 +1751,124 @@ export default function ZhishuApp() {
   );
 }
 
+/** 本轮结束后自动打开的那一个成果：优先报告，其次处理后的工作簿；都没有则不自动开。 */
+function pickPrimaryArtifact(artifacts: Artifact[]): Artifact | null {
+  const byNewest = (a: Artifact, b: Artifact) => (a.createdAt < b.createdAt ? 1 : -1);
+  const reports = artifacts.filter((a) => a.kind === 'report').sort(byNewest);
+  if (reports.length) return reports[0];
+  const workbooks = artifacts.filter((a) => a.kind === 'workbook').sort(byNewest);
+  return workbooks[0] ?? null;
+}
+
+const ARTIFACT_GROUPS: { kind: ArtifactKind; label: string; noun: string; icon: typeof FileText }[] = [
+  { kind: 'report', label: '分析报告', noun: '分析报告', icon: FileText },
+  { kind: 'workbook', label: '处理后的工作簿', noun: '工作簿', icon: FileSpreadsheet },
+  { kind: 'table', label: '数据表', noun: '数据表', icon: Table2 },
+  { kind: 'chart', label: '图表', noun: '图表', icon: BarChart3 },
+  { kind: 'other', label: '其他成果', noun: '文件', icon: FileText },
+];
+
+/**
+ * 成果抽屉：从数据面板右侧滑出的独立面板，替代原先压在底部的窄条。
+ * 按分级分节（报告在前，图表 / 数据表在后），每项一行、留白充足、有明确「打开 / 下载」。
+ */
+function ArtifactDrawer({
+  artifacts,
+  files,
+  activeId,
+  onClose,
+  onOpenArtifact,
+  onOpenFile,
+  onRemoveFile,
+}: {
+  artifacts: Artifact[];
+  files: UploadedFile[];
+  activeId: string | null;
+  onClose: () => void;
+  onOpenArtifact: (artifact: Artifact) => void;
+  onOpenFile: (file: UploadedFile) => void;
+  onRemoveFile: (file: UploadedFile) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const hasReport = artifacts.some((a) => a.kind === 'report');
+
+  return (
+    <>
+      <button type="button" className="drawer-scrim" aria-label="关闭成果面板" onClick={onClose} />
+      <aside className="artifact-drawer" role="dialog" aria-label="成果">
+        <header>
+          <span><Package size={16} /> 成果</span>
+          <button type="button" aria-label="关闭" onClick={onClose}><X size={16} /></button>
+        </header>
+        <div className="drawer-body">
+          {artifacts.length === 0 && (
+            <p className="drawer-empty">分析完成后，报告、数据表与图表会显示在这里。</p>
+          )}
+          {ARTIFACT_GROUPS.map((group) => {
+            const items = artifacts.filter((a) => a.kind === group.kind);
+            if (items.length === 0) return null;
+            const Icon = group.icon;
+            return (
+              <section key={group.kind} className="drawer-section">
+                <h4>
+                  {group.label} <b>{items.length}</b>
+                  {group.kind === 'chart' && hasReport && <span>· 已内联在报告中</span>}
+                </h4>
+                {items.map((artifact) => (
+                  <button
+                    key={artifact.id}
+                    type="button"
+                    className={`drawer-row ${group.kind === 'report' ? 'report' : ''} ${activeId === artifact.id ? 'active' : ''}`}
+                    onClick={() => onOpenArtifact(artifact)}
+                  >
+                    <span className="ic"><Icon size={15} /></span>
+                    <span className="meta">
+                      <strong>{artifact.name}</strong>
+                      <span>{formatFileSize(artifact.size)} · {group.noun}</span>
+                    </span>
+                    <Download className="act" size={15} onClick={(e) => { e.stopPropagation(); void downloadArtifact(artifact); }} />
+                  </button>
+                ))}
+              </section>
+            );
+          })}
+          {files.length > 0 && (
+            <section className="drawer-section">
+              <h4>输入文件 <b>{files.length}</b></h4>
+              {files.map((file) => (
+                <button
+                  key={file.id}
+                  type="button"
+                  className={`drawer-row ${activeId === file.id ? 'active' : ''}`}
+                  onClick={() => onOpenFile(file)}
+                >
+                  <span className="ic"><Paperclip size={15} /></span>
+                  <span className="meta">
+                    <strong>{file.name}</strong>
+                    <span>{formatFileSize(file.size)} · 原始文件</span>
+                  </span>
+                  <X className="act danger" size={15} onClick={(e) => { e.stopPropagation(); onRemoveFile(file); }} />
+                </button>
+              ))}
+            </section>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
+
 function ArtifactPreview({ artifact }: { artifact: Artifact }) {
   const [objectUrl, setObjectUrl] = useState('');
+  const [svgDoc, setSvgDoc] = useState('');
   const [failed, setFailed] = useState(false);
+  const isSvg = artifact.mediaType === 'image/svg+xml';
+  const isRaster = artifact.mediaType.startsWith('image/') && !isSvg;
   const canEmbed = artifact.mediaType.startsWith('image/')
     || artifact.mediaType.startsWith('text/')
     || artifact.mediaType === 'text/html'
@@ -1721,10 +1879,24 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
     let url = '';
     let active = true;
     api.artifacts.blob(artifact.id)
-      .then((blob) => { if (active) { url = URL.createObjectURL(blob); setObjectUrl(url); } })
+      .then(async (blob) => {
+        if (!active) return;
+        if (isSvg) {
+          // huashu-excel 的图表 SVG 常带 width="100%" 无 height（<img> 里会塌成 0 高），
+          // 而且弱模型偶尔写出非法 XML（如裸属性 tabular-nums），当作 image/svg+xml 严格解析会在首个错误处中断 —— 表现为“碎图”。
+          // 包一层 HTML 文档用宽松的 HTML 解析器渲染，sandbox 掐掉脚本，兼容这两类问题。
+          const text = await blob.text();
+          setSvgDoc(
+            `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#fff}svg{display:block;width:100%;height:100%;object-fit:contain}</style>${text}`,
+          );
+          return;
+        }
+        url = URL.createObjectURL(blob);
+        setObjectUrl(url);
+      })
       .catch(() => { if (active) setFailed(true); });
     return () => { active = false; if (url) URL.revokeObjectURL(url); };
-  }, [artifact.id, canEmbed]);
+  }, [artifact.id, canEmbed, isSvg]);
 
   return (
     <div className="artifact-preview">
@@ -1735,8 +1907,12 @@ function ArtifactPreview({ artifact }: { artifact: Artifact }) {
         </button>
       </div>
       {canEmbed && !failed ? (
-        objectUrl ? (
-          artifact.mediaType.startsWith('image/')
+        isSvg ? (
+          svgDoc
+            ? <iframe className="artifact-frame" srcDoc={svgDoc} title={artifact.name} sandbox="" referrerPolicy="no-referrer" />
+            : <div className="data-state"><LoaderCircle className="spin" size={20} />正在加载成果</div>
+        ) : objectUrl ? (
+          isRaster
             ? <img className="artifact-frame" src={objectUrl} alt={artifact.name} />
             : <iframe className="artifact-frame" src={objectUrl} title={artifact.name} sandbox="allow-popups allow-downloads" referrerPolicy="no-referrer" />
         ) : (
