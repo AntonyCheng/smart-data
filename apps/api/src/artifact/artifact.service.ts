@@ -6,12 +6,23 @@ import { IdentityService } from '../common/identity.service';
 import { WorkspaceService } from '../common/workspace.service';
 import { ApiError, ApiErrorCode } from '../common/errors';
 
+/**
+ * 成果分级：
+ * - `report`   自包含分析报告（HTML/DOCX/PDF/Markdown），report 模式的主交付物
+ * - `workbook` 处理后的 Excel，operate 模式的主交付物
+ * - `table`    支撑数据表（CSV），属于分析原料
+ * - `chart`    图表文件（SVG/PNG），多数已内联进报告，属于分析原料
+ * - `other`    其余
+ */
+export type ArtifactKind = 'report' | 'workbook' | 'table' | 'chart' | 'other';
+
 export interface ArtifactView {
   id: string;
   name: string;
   relativePath: string;
   mediaType: string;
   size: number;
+  kind: ArtifactKind;
   createdAt: Date;
 }
 
@@ -48,6 +59,23 @@ const DELIVERABLE_EXT = new Set([
 
 function mediaTypeFor(name: string): string {
   return MEDIA_TYPES[path.extname(name).toLowerCase()] ?? 'application/octet-stream';
+}
+
+const REPORT_EXT = new Set(['.html', '.htm', '.docx', '.pdf', '.md']);
+const CHART_EXT = new Set(['.svg', '.png', '.jpg', '.jpeg']);
+
+/**
+ * 按扩展名派生成果分级（见 ArtifactKind）。
+ * Excel 一律算主交付物 `workbook`（operate 模式的结果就写在 output/tables/ 下，也要自动打开）；
+ * 只有 CSV 才归到支撑数据 `table`。
+ */
+function kindFor(relativePath: string): ArtifactKind {
+  const ext = path.extname(relativePath).toLowerCase();
+  if (EXCEL_EXT.has(ext)) return 'workbook';
+  if (ext === '.csv') return 'table';
+  if (CHART_EXT.has(ext)) return 'chart';
+  if (REPORT_EXT.has(ext)) return 'report';
+  return 'other';
 }
 
 /** 隐藏文件、下划线开头的内部文件、以及非交付类扩展名都不算成果。 */
@@ -181,6 +209,7 @@ export class ArtifactService {
       relativePath: r.relativePath,
       mediaType: r.mediaType,
       size: Number(r.size),
+      kind: kindFor(r.relativePath),
       createdAt: r.createdAt,
     };
   }
