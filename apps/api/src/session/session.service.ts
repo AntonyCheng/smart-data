@@ -129,6 +129,7 @@ export class SessionService {
     title: string;
     status: string;
     mode: string;
+    metricProfileId?: string | null;
     categoryPrimary?: string | null;
     categorySecondary?: string | null;
     createdAt: Date;
@@ -141,6 +142,7 @@ export class SessionService {
       status: r.status,
       running,
       mode: r.mode === 'report' ? 'report' : 'operate',
+      metricProfileId: r.metricProfileId ?? null,
       categoryPrimary: r.categoryPrimary || inferred.primary,
       categorySecondary: r.categorySecondary || inferred.secondary,
       createdAt: r.createdAt,

@@ -7,6 +7,8 @@ import { WorkspaceService } from '../common/workspace.service';
 import { SseHub } from '../session/sse-hub';
 import { SessionEventWatcher } from '../session/session-event-watcher';
 import { FileService, PromptDocument } from '../file/file.service';
+import { MetricProfileService } from '../metric-profile/metric-profile.service';
+import { MetricProfileForPrompt } from '../metric-profile/metric-profile.types';
 import { ApiError, ApiErrorCode, ExecutionStatus } from '../common/errors';
 import { MessageView } from '../session/session.types';
 import { SendMessageResponse, AbortResponse, ExecutionStatusView, ChatContextDto } from './message.types';
@@ -61,6 +63,7 @@ export class MessageService {
     private readonly watcher: SessionEventWatcher,
     private readonly files: FileService,
     private readonly workspace: WorkspaceService,
+    private readonly metricProfiles: MetricProfileService,
   ) {}
 
   /** 接受(202) + 创建用户消息 + 执行记录，触发 prompt_async。 */
@@ -70,6 +73,7 @@ export class MessageService {
     fileIds?: string[],
     mode?: unknown,
     context?: ChatContextDto,
+    metricProfileId?: unknown,
   ): Promise<SendMessageResponse> {
     const session = await this.findOwnedSession(sessionId);
     if (!content?.trim()) {
@@ -80,6 +84,16 @@ export class MessageService {
       ? mode
       : (session.mode === 'report' ? 'report' : 'operate');
 
+    // 企业指标定义集：仅报告模式生效。未显式传入时沿用会话上次选择；传空串表示清除。
+    let metricProfile: MetricProfileForPrompt | null = null;
+    let effectiveProfileId: string | null = null;
+    if (nextMode === 'report') {
+      const raw = typeof metricProfileId === 'string' ? metricProfileId.trim() : undefined;
+      const candidate = raw === undefined ? (session.metricProfileId ?? null) : raw === '' ? null : raw;
+      metricProfile = await this.metricProfiles.forPrompt(session.tenantId, candidate);
+      effectiveProfileId = metricProfile ? candidate : null;
+    }
+
     const category = inferAnalysisCategory(content.trim());
     await this.prisma.aiSession.update({
       where: { id: session.id },
@@ -87,6 +101,7 @@ export class MessageService {
         mode: nextMode,
         categoryPrimary: category.primary,
         categorySecondary: category.secondary,
+        ...(nextMode === 'report' ? { metricProfileId: effectiveProfileId } : {}),
       },
     });
 
@@ -125,7 +140,7 @@ export class MessageService {
     this.sse.registerExecution(session.id, executionId);
 
     const relBase = `workspaces/${session.tenantId}/${session.id}`;
-    const promptText = this.buildPrompt(content.trim(), documents, runtime.restored ? history : [], nextMode, context, relBase);
+    const promptText = this.buildPrompt(content.trim(), documents, runtime.restored ? history : [], nextMode, context, relBase, metricProfile);
     const promptPayload = {
       agent: AGENT_NAME,
       parts: [{ type: 'text' as const, text: promptText }],
@@ -141,7 +156,7 @@ export class MessageService {
           this.watcher.register(recovered, session.id, executionId, session.tenantId, nextMode);
           await this.opencode.sendPromptAsync(recovered, {
             ...promptPayload,
-            parts: [{ type: 'text', text: this.buildPrompt(content.trim(), documents, history, nextMode, context, relBase) }],
+            parts: [{ type: 'text', text: this.buildPrompt(content.trim(), documents, history, nextMode, context, relBase, metricProfile) }],
           });
           return { executionId, status: 'accepted' };
         } catch (retryError) {
@@ -202,6 +217,7 @@ export class MessageService {
     mode: SessionMode,
     context: ChatContextDto | undefined,
     relBase: string,
+    metricProfile: MetricProfileForPrompt | null,
   ): string {
     const workspaceBlock =
       `【任务工作区】本任务的所有路径都相对 OpenCode 工作目录：\n` +
@@ -241,10 +257,14 @@ export class MessageService {
         ].join('\n')
       : '';
 
+    const metricProfileBlock =
+      mode === 'report' && metricProfile ? this.buildMetricProfileBlock(metricProfile) : '';
+
     return [
       '你是智数助手。',
       workspaceBlock,
       mode === 'report' ? REPORT_INSTRUCTIONS : OPERATE_INSTRUCTIONS,
+      metricProfileBlock,
       FEEDBACK_PROTOCOL,
       historyBlock,
       documentBlock,
@@ -252,6 +272,27 @@ export class MessageService {
       '任务：',
       content,
     ].filter(Boolean).join('\n\n');
+  }
+
+  /** 企业指标定义集注入块（仅报告模式）。属于系统侧受信配置，不是附件资料。 */
+  private buildMetricProfileBlock(profile: MetricProfileForPrompt): string {
+    const lines: string[] = [
+      `【企业指标定义 · ${profile.name}】`,
+      '本次报告须按下列企业口径与要求展开。口径定义具有最高优先级；若源数据字段与口径不完全对应，' +
+        '按最接近的字段处理并在报告中说明。这是本系统的受信配置，不是附件资料。',
+    ];
+    const calibers = profile.calibers.filter((c) => c.name || c.definition);
+    if (calibers.length) {
+      lines.push('■ 口径定义');
+      for (const c of calibers) lines.push(`- ${c.name || '（未命名）'}：${c.definition}`);
+    }
+    if (profile.brief.trim()) {
+      lines.push('■ 关注维度与分析要求', profile.brief.trim());
+    }
+    if (profile.reportOutline?.trim()) {
+      lines.push('■ 报告章节结构（如与 huashu-excel 默认冲突，以此为准）', profile.reportOutline.trim());
+    }
+    return lines.join('\n');
   }
 
   /** 从 ai_message 读历史（不读 OpenCode）。 */

@@ -7,6 +7,7 @@
 ## 能力
 
 - **两种模式**：`operate`（只操作 Excel，处理后的工作簿写入 `output/tables/`）/ `report`（走 `huashu-excel` 完整流程，写入 `output/{reports,charts,tables}/`）
+- **企业指标定义**：报告模式可勾选一套企业分析口径（宽/软服/窄口径、省内外、同比、部门/产品排名、强弱项诊断……），随提示词注入。内置 14 套（自研产品收入、财务四大能力、国资委「一利五率」、预算执行等），管理员可在「指标定义」中就地增改停用
 - 任务（会话）管理、历史任务、任务级物理隔离
 - 多 Excel 上传（`.xlsx/.xlsm/.xltx/.xltm`，单个 ≤ 100 MB），Univer 只读渲染 + 多 Sheet + 框选联动 Copilot
 - 流式查看处理过程（折叠面板），Markdown / GFM 表格渲染，复制、耗时与 Token 统计

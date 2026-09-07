@@ -9,6 +9,7 @@ import { SessionModule } from './session/session.module';
 import { MessageModule } from './message/message.module';
 import { FileModule } from './file/file.module';
 import { ArtifactModule } from './artifact/artifact.module';
+import { MetricProfileModule } from './metric-profile/metric-profile.module';
 import { AdminModule } from './admin/admin.module';
 
 /**
@@ -27,6 +28,7 @@ import { AdminModule } from './admin/admin.module';
     MessageModule,
     FileModule,
     ArtifactModule,
+    MetricProfileModule,
     AdminModule,
   ],
 })

@@ -11,6 +11,8 @@ export class SendMessageDto {
   fileIds?: string[];
   mode?: 'operate' | 'report';
   context?: ChatContextDto;
+  /** 报告模式的企业指标定义集 id；'' 表示清除，省略表示沿用会话上次选择。 */
+  metricProfileId?: string | null;
 }
 
 export interface SendMessageResponse {

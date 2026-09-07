@@ -11,7 +11,7 @@ export class MessageController {
   @Post('messages')
   @HttpCode(202)
   send(@Param('id') id: string, @Body() dto: SendMessageDto): Promise<SendMessageResponse> {
-    return this.messages.send(id, dto?.content, dto?.fileIds, dto?.mode, dto?.context);
+    return this.messages.send(id, dto?.content, dto?.fileIds, dto?.mode, dto?.context, dto?.metricProfileId);
   }
 
   /** Design §15: history from ai_message. */

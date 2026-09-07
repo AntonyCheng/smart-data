@@ -18,12 +18,13 @@ model SysTenant {
   updatedAt  DateTime @updatedAt @map("updated_at")
   deletedAt  DateTime? @map("deleted_at")
 
-  users      SysUser[]
-  sessions   AiSession[]
-  messages   AiMessage[]
-  files      AiFile[]
-  artifacts  AiArtifact[]
-  executions AiExecution[]
+  users          SysUser[]
+  sessions       AiSession[]
+  messages       AiMessage[]
+  files          AiFile[]
+  artifacts      AiArtifact[]
+  executions     AiExecution[]
+  metricProfiles AiMetricProfile[]
 
   @@map("sys_tenant")
 }
@@ -54,6 +55,7 @@ model AiSession {
   userId            String    @map("user_id") @db.Uuid
   title             String    @default("新任务")
   mode              String    @default("operate")
+  metricProfileId   String?   @map("metric_profile_id") @db.Uuid
   opencodeSessionId String?   @unique @map("opencode_session_id")
   status            String    @default("ACTIVE")
   categoryPrimary   String?   @map("category_primary")
@@ -132,6 +134,33 @@ model AiArtifact {
   @@index([sessionId])
   @@index([tenantId])
   @@map("ai_artifact")
+}
+
+/// 企业指标定义集：报告模式下可勾选的、按公司业务口径预写的分析方案。
+/// 只作为 prompt 上下文注入，分析逻辑仍全部委托 huashu-excel。
+model AiMetricProfile {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  key           String?                                  // 预置集稳定标识；自建集为 null
+  name          String
+  summary       String    @default("")
+  category      String    @default("其他")
+  calibers      Json      @default("[]")                 // [{ name, definition }]
+  brief         String    @default("") @db.Text          // 关注维度 + 分析要求（markdown）
+  reportOutline String?   @map("report_outline") @db.Text
+  builtin       Boolean   @default(false)
+  enabled       Boolean   @default(true)
+  sortOrder     Int       @default(100) @map("sort_order")
+  createdBy     String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  tenant SysTenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@map("ai_metric_profile")
 }
 
 model AiExecution {

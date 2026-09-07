@@ -15,6 +15,7 @@ export interface SessionView {
   status: string;
   running: boolean;
   mode: 'operate' | 'report';
+  metricProfileId: string | null;
   categoryPrimary: string;
   categorySecondary: string;
   createdAt: Date;
