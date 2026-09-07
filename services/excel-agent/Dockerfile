@@ -1,14 +1,19 @@
 FROM node:22-bookworm-slim
 
 # 系统依赖：LibreOffice（verify_xlsx / verify_docx 的 PDF 渲染自检）、CJK 字体、ripgrep、Python 运行时
-# apt 走中科大镜像（deb.debian.org 在国内网络极慢）
-RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+# apt 走阿里云镜像（deb.debian.org 在国内网络极慢；中科大镜像近期对大包偶发丢连接）。
+# Acquire::Retries 让个别包下载失败时自动重试，而不是整层 exit 100。
+# CJK 字体用文泉驿正黑（~8 MB）而非 fonts-noto-cjk（~120 MB 单包，最易在慢镜像上超时）——
+# LibreOffice 的 PDF 自检只需要一套不出豆腐块的中文字体即可。
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' \
+      /etc/apt/sources.list.d/debian.sources \
+ && printf 'Acquire::Retries "8";\nAcquire::http::Timeout "60";\n' > /etc/apt/apt.conf.d/80retries \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       python3 python3-pip python3-venv \
       libreoffice-calc libreoffice-writer \
-      fonts-noto-cjk \
+      fonts-wqy-zenhei \
       ripgrep \
       libgcc-s1 libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
