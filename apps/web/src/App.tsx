@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -37,6 +38,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Ruler,
   Table2,
   Tags,
   Trash2,
@@ -58,6 +60,8 @@ import {
   type Artifact,
   type ArtifactKind,
   type AuthUser,
+  type MetricCaliber,
+  type MetricProfile,
   type RuntimeEvent,
   type SessionMode,
   type UploadedFile,
@@ -79,7 +83,7 @@ import {
 
 type AuthState = 'checking' | 'guest' | 'ready';
 type ProcessStatus = 'running' | 'done' | 'error';
-type AdminView = 'users' | 'stats';
+type AdminView = 'users' | 'stats' | 'metrics';
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const UPLOAD_HINT = '支持 .xlsx / .xlsm / .xltx / .xltm，单个文件不超过 100 MB。';
@@ -631,6 +635,225 @@ function AdminUserDialog({
   );
 }
 
+const METRIC_CATEGORIES = ['收入', '财务', '考核', '经营', '营运', '人效', '销售', '产品', '战略', '其他'];
+
+type MetricDraft = {
+  name: string;
+  summary: string;
+  category: string;
+  calibers: MetricCaliber[];
+  brief: string;
+  reportOutline: string;
+  enabled: boolean;
+};
+
+function toDraft(p: MetricProfile): MetricDraft {
+  return {
+    name: p.name,
+    summary: p.summary,
+    category: p.category,
+    calibers: p.calibers.length ? p.calibers.map((c) => ({ ...c })) : [],
+    brief: p.brief,
+    reportOutline: p.reportOutline ?? '',
+    enabled: p.enabled,
+  };
+}
+
+const BLANK_DRAFT: MetricDraft = {
+  name: '', summary: '', category: '其他', calibers: [{ name: '', definition: '' }],
+  brief: '', reportOutline: '', enabled: true,
+};
+
+/** 管理后台「指标定义」：预置集就地编辑（全租户生效，不可删只能停用），可新建自建集。 */
+function MetricsAdmin() {
+  const [list, setList] = useState<MetricProfile[] | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [selectedId, setSelectedId] = useState<string | 'new' | null>(null);
+  const [draft, setDraft] = useState<MetricDraft>(BLANK_DRAFT);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void api.metricProfiles.list(true)
+      .then((rows) => { if (active) setList(rows); })
+      .catch((cause) => { if (active) setLoadError(cause instanceof ApiError ? cause.message : '加载失败'); });
+    return () => { active = false; };
+  }, []);
+
+  const selected = selectedId && selectedId !== 'new' ? list?.find((p) => p.id === selectedId) ?? null : null;
+  const isNew = selectedId === 'new';
+
+  function pick(profile: MetricProfile) {
+    setSelectedId(profile.id);
+    setDraft(toDraft(profile));
+    setFormError('');
+  }
+  function startNew() {
+    setSelectedId('new');
+    setDraft(BLANK_DRAFT);
+    setFormError('');
+  }
+  function patchDraft(patch: Partial<MetricDraft>) {
+    setDraft((d) => ({ ...d, ...patch }));
+  }
+  function setCaliber(idx: number, patch: Partial<MetricCaliber>) {
+    setDraft((d) => ({ ...d, calibers: d.calibers.map((c, i) => (i === idx ? { ...c, ...patch } : c)) }));
+  }
+
+  async function save() {
+    if (!draft.name.trim()) { setFormError('名称不能为空'); return; }
+    setSaving(true);
+    setFormError('');
+    const input = {
+      name: draft.name.trim(),
+      summary: draft.summary.trim(),
+      category: draft.category,
+      calibers: draft.calibers.filter((c) => c.name.trim() || c.definition.trim()),
+      brief: draft.brief,
+      reportOutline: draft.reportOutline.trim() ? draft.reportOutline : null,
+      enabled: draft.enabled,
+    };
+    try {
+      if (isNew) {
+        const created = await api.metricProfiles.create(input);
+        setList((rows) => [...(rows ?? []), created].sort((a, b) => a.sortOrder - b.sortOrder));
+        setSelectedId(created.id);
+        setDraft(toDraft(created));
+      } else if (selected) {
+        const updated = await api.metricProfiles.update(selected.id, input);
+        setList((rows) => (rows ?? []).map((p) => (p.id === updated.id ? updated : p)));
+        setDraft(toDraft(updated));
+      }
+    } catch (cause) {
+      setFormError(cause instanceof ApiError ? cause.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleEnabled(profile: MetricProfile) {
+    try {
+      const updated = await api.metricProfiles.update(profile.id, { enabled: !profile.enabled });
+      setList((rows) => (rows ?? []).map((p) => (p.id === updated.id ? updated : p)));
+      if (selectedId === updated.id) setDraft(toDraft(updated));
+    } catch { /* 忽略，下次刷新纠正 */ }
+  }
+
+  async function remove(profile: MetricProfile) {
+    if (!window.confirm(`删除自建指标定义集“${profile.name}”？`)) return;
+    try {
+      await api.metricProfiles.remove(profile.id);
+      setList((rows) => (rows ?? []).filter((p) => p.id !== profile.id));
+      if (selectedId === profile.id) { setSelectedId(null); }
+    } catch (cause) {
+      setFormError(cause instanceof ApiError ? cause.message : '删除失败');
+    }
+  }
+
+  if (loadError) return <div className="admin-state error"><TriangleAlert size={19} />{loadError}</div>;
+  if (!list) return <div className="admin-state"><LoaderCircle className="spin" size={20} />正在加载</div>;
+
+  return (
+    <section className="metrics-admin">
+      <div className="admin-section-heading">
+        <div><h2>指标定义</h2><p>报告模式下可勾选的企业分析口径，仅作为提示词上下文注入，分析仍由 huashu-excel 执行</p></div>
+        <div className="admin-heading-actions">
+          <span>{list.length} 套</span>
+          <button type="button" className="admin-add-user" onClick={startNew}><Plus size={15} />新建</button>
+        </div>
+      </div>
+      <div className="metrics-admin-body">
+        <ul className="metrics-list">
+          {list.map((p) => (
+            <li key={p.id}>
+              <button type="button" className={`metrics-list-row ${selectedId === p.id ? 'active' : ''}`} onClick={() => pick(p)}>
+                <span className="mlr-name">{p.name}</span>
+                <span className="mlr-tags">
+                  <span className="mlr-cat">{p.category}</span>
+                  {p.builtin && <span className="mlr-builtin">预置</span>}
+                  {!p.enabled && <span className="mlr-off">已停用</span>}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        {selectedId ? (
+          <form className="metrics-editor" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+            {!isNew && selected?.builtin && (
+              <div className="metrics-editor-hint"><TriangleAlert size={14} />系统预置集，修改后对全部分析师生效</div>
+            )}
+            <label><span>名称</span>
+              <input value={draft.name} onChange={(e) => patchDraft({ name: e.target.value })} placeholder="如：自研产品收入分析" />
+            </label>
+            <label><span>一句话说明</span>
+              <input value={draft.summary} onChange={(e) => patchDraft({ summary: e.target.value })} placeholder="选择器里显示的副标题" />
+            </label>
+            <label><span>分类</span>
+              <select value={draft.category} onChange={(e) => patchDraft({ category: e.target.value })}>
+                {METRIC_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+
+            <div className="metrics-calibers">
+              <div className="mc-head"><span>口径定义</span>
+                <button type="button" onClick={() => patchDraft({ calibers: [...draft.calibers, { name: '', definition: '' }] })}>
+                  <Plus size={13} />加一条
+                </button>
+              </div>
+              {draft.calibers.map((c, idx) => (
+                <div className="mc-row" key={idx}>
+                  <input className="mc-name" value={c.name} onChange={(e) => setCaliber(idx, { name: e.target.value })} placeholder="口径名，如 宽口径" />
+                  <textarea className="mc-def" value={c.definition} onChange={(e) => setCaliber(idx, { definition: e.target.value })} placeholder="口径的具体计算范围 / 公式" rows={2} />
+                  <button type="button" className="mc-del" aria-label="删除该口径"
+                    onClick={() => patchDraft({ calibers: draft.calibers.filter((_, i) => i !== idx) })}>
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <label><span>关注维度与分析要求</span>
+              <textarea value={draft.brief} onChange={(e) => patchDraft({ brief: e.target.value })} rows={8}
+                placeholder="省内外、同比、部门/产品排名、强弱项诊断、改进建议……" />
+              <small className="metrics-count">{draft.brief.length} / 4000</small>
+            </label>
+            <label><span>报告章节结构（选填）</span>
+              <textarea value={draft.reportOutline} onChange={(e) => patchDraft({ reportOutline: e.target.value })} rows={6}
+                placeholder="留空则用 huashu-excel 默认大纲" />
+            </label>
+            <label className="metrics-enabled">
+              <input type="checkbox" checked={draft.enabled} onChange={(e) => patchDraft({ enabled: e.target.checked })} />
+              <span>启用（在报告选择器中可见）</span>
+            </label>
+
+            {formError && <div className="admin-dialog-error"><TriangleAlert size={15} />{formError}</div>}
+            <footer className="metrics-editor-actions">
+              {!isNew && selected && !selected.builtin && (
+                <button type="button" className="admin-user-action danger" onClick={() => void remove(selected)}>
+                  <Trash2 size={14} />删除
+                </button>
+              )}
+              {!isNew && selected && (
+                <button type="button" className="admin-user-action" onClick={() => void toggleEnabled(selected)}>
+                  {selected.enabled ? '停用' : '启用'}
+                </button>
+              )}
+              <button type="submit" className="admin-dialog-submit" disabled={saving}>
+                {saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}
+                {saving ? '保存中' : isNew ? '创建' : '保存修改'}
+              </button>
+            </footer>
+          </form>
+        ) : (
+          <div className="metrics-editor-empty">从左侧选择一套查看 / 编辑，或点「新建」。</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function AdminPanel({
   view, currentUserId, onView, onClose, onLogout, onOpenSidebar,
 }: {
@@ -647,16 +870,17 @@ function AdminPanel({
   const [panelError, setPanelError] = useState('');
   const [userDialog, setUserDialog] = useState<{ kind: 'create' } | { kind: 'reset'; user: AdminUser } | null>(null);
 
-  const ready = loaded?.view === view;
+  const ready = view === 'metrics' || loaded?.view === view;
   const loading = !ready;
   const users = (userOverrides?.view === view ? userOverrides.rows : null) ?? loaded?.users ?? [];
   const stats = ready ? loaded?.stats ?? null : null;
-  const dataError = ready ? loaded?.error : undefined;
+  const dataError = ready && loaded?.view === view ? loaded?.error : undefined;
   const setUsers = (updater: AdminUser[] | ((rows: AdminUser[]) => AdminUser[])) =>
     setUserOverrides({ view, rows: typeof updater === 'function' ? updater(users) : updater });
 
   useEffect(() => {
     let active = true;
+    if (view === 'metrics') return () => { active = false; };
     const request = view === 'users' ? api.admin.users() : api.admin.stats();
     void request.then((result) => {
       if (!active) return;
@@ -733,12 +957,15 @@ function AdminPanel({
       <nav aria-label="管理功能">
         <button type="button" className={view === 'users' ? 'active' : ''} onClick={() => onView('users')}><Users size={16} />用户管理</button>
         <button type="button" className={view === 'stats' ? 'active' : ''} onClick={() => onView('stats')}><BarChart3 size={16} />统计分析</button>
+        <button type="button" className={view === 'metrics' ? 'active' : ''} onClick={() => onView('metrics')}><Ruler size={16} />指标定义</button>
       </nav>
       <div className="admin-panel-content">
         {loading ? (
           <div className="admin-state"><LoaderCircle className="spin" size={20} />正在加载</div>
         ) : (panelError || dataError) ? (
           <div className="admin-state error"><TriangleAlert size={19} />{panelError || dataError}</div>
+        ) : view === 'metrics' ? (
+          <MetricsAdmin />
         ) : view === 'users' ? (
           <section className="admin-users">
             <div className="admin-section-heading">
@@ -886,6 +1113,10 @@ export default function ZhishuApp() {
   const [selection, setSelection] = useState<SheetSelection | null>(null);
   const [draft, setDraft] = useState('');
   const [mode, setMode] = useState<SessionMode>('operate');
+  const [metricProfiles, setMetricProfiles] = useState<MetricProfile[]>([]);
+  const [metricProfileId, setMetricProfileId] = useState<string | null>(null);
+  const [profilePeek, setProfilePeek] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [processItems, setProcessItems] = useState<ProcessItem[]>([]);
   const [processArchive, setProcessArchive] = useState<Record<string, ProcessItem[]>>({});
   const [liveMarkdown, setLiveMarkdown] = useState('');
@@ -910,6 +1141,24 @@ export default function ZhishuApp() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const profileSelectRef = useRef<HTMLDivElement | null>(null);
+  const tabsWheelCleanup = useRef<(() => void) | null>(null);
+
+  // 标签条：竖直滚轮直接横向滚动（滚动条已隐藏，否则要 Shift+滚轮）。
+  // 用回调 ref，节点一挂载就绑定 —— 不受登录 / 管理台切换等 re-render 影响。
+  const dataTabsScrollRef = useCallback((node: HTMLDivElement | null) => {
+    tabsWheelCleanup.current?.();
+    tabsWheelCleanup.current = null;
+    if (!node) return;
+    const onWheel = (event: globalThis.WheelEvent) => {
+      if (event.deltaY === 0 || event.shiftKey) return;
+      if (node.scrollWidth <= node.clientWidth) return;
+      event.preventDefault();
+      node.scrollLeft += event.deltaY;
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    tabsWheelCleanup.current = () => node.removeEventListener('wheel', onWheel);
+  }, []);
   const artifactsRef = useRef<Artifact[]>([]);
   useEffect(() => { artifactsRef.current = artifacts; }, [artifacts]);
 
@@ -1014,6 +1263,16 @@ export default function ZhishuApp() {
 
   // Load the workbook for the active Excel tab. State updates happen only from
   // the resolved request, never synchronously in the effect body.
+  // 指标定义集：进入工作台时加载一次；每次离开管理后台后刷新（管理员可能刚编辑过）。
+  useEffect(() => {
+    if (!user || adminView) return;
+    let active = true;
+    void api.metricProfiles.list()
+      .then((rows) => { if (active) setMetricProfiles(rows); })
+      .catch(() => { if (active) setMetricProfiles([]); });
+    return () => { active = false; };
+  }, [user, adminView]);
+
   useEffect(() => {
     if (!activeTab || !EXCEL_RE.test(activeTab.item.name)) return;
     const key = tabKey(activeTab);
@@ -1130,6 +1389,9 @@ export default function ZhishuApp() {
       setArtifacts(nextArtifacts);
       setRunning(sessionDetail.running);
       setMode(sessionDetail.mode);
+      setMetricProfileId(sessionDetail.metricProfileId);
+      setProfilePeek(false);
+      setProfileMenuOpen(false);
       const firstExcel = nextFiles.find((f) => EXCEL_RE.test(f.name));
       if (firstExcel) openTab({ kind: 'file', item: firstExcel });
     } catch (cause) {
@@ -1157,6 +1419,9 @@ export default function ZhishuApp() {
     setRunning(false);
     setError('');
     setSidebarOpen(false);
+    setMetricProfileId(null);
+    setProfilePeek(false);
+    setProfileMenuOpen(false);
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
@@ -1283,7 +1548,10 @@ export default function ZhishuApp() {
     setRunning(true);
 
     try {
-      await api.messages.send(sessionId, content, attachedFileIds, mode, context);
+      await api.messages.send(
+        sessionId, content, attachedFileIds, mode, context,
+        mode === 'report' ? (metricProfileId ?? '') : undefined,
+      );
       const session = sessions.find((row) => row.id === sessionId);
       if (session && (session.title === '新任务' || session.title === '数据分析')) {
         await api.sessions.update(sessionId, { title: content.replace(/\s+/g, ' ').slice(0, 30) }).catch(() => undefined);
@@ -1416,6 +1684,21 @@ export default function ZhishuApp() {
     return () => document.removeEventListener('pointerdown', closeWhenOutside);
   }, [accountMenuOpen]);
 
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const closeWhenOutside = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && !profileSelectRef.current?.contains(target)) setProfileMenuOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') setProfileMenuOpen(false); };
+    document.addEventListener('pointerdown', closeWhenOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [profileMenuOpen]);
+
   if (authState === 'checking') {
     return (
       <main className="boot-screen">
@@ -1429,6 +1712,12 @@ export default function ZhishuApp() {
 
   const contextParts = [activeTab?.item.name, activeSelection?.sheet, activeSelection?.range].filter(Boolean) as string[];
   const contextSummary = activeSelection?.range ?? activeSelection?.sheet ?? activeTab?.item.name ?? '未选择数据';
+
+  const selectedProfile = metricProfileId ? metricProfiles.find((p) => p.id === metricProfileId) ?? null : null;
+  const groupedProfiles = METRIC_CATEGORIES.map((category) => ({
+    category,
+    items: metricProfiles.filter((p) => p.category === category),
+  })).filter((g) => g.items.length > 0);
 
   return (
     <div className="chat-app">
@@ -1479,6 +1768,10 @@ export default function ZhishuApp() {
                     <Users size={17} />
                     <span><strong>用户管理</strong><small>管理用户账号与启用状态</small></span>
                   </button>
+                  <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSidebarOpen(false); setAdminView('metrics'); }}>
+                    <Ruler size={17} />
+                    <span><strong>指标定义</strong><small>维护报告模式的企业分析口径</small></span>
+                  </button>
                   <i />
                 </>
               )}
@@ -1504,7 +1797,7 @@ export default function ZhishuApp() {
           <PanelGroup direction="horizontal" className="workbench">
             <Panel defaultSize={58} minSize={30} className="data-pane">
               <div className="data-tabs">
-                <div className="data-tabs-scroll">
+                <div className="data-tabs-scroll" ref={dataTabsScrollRef}>
                   <button type="button" className="mobile-menu" aria-label="打开历史任务" onClick={() => setSidebarOpen(true)}><Menu size={19} /></button>
                   {tabs.map((tab) => {
                     const key = tabKey(tab);
@@ -1683,6 +1976,82 @@ export default function ZhishuApp() {
                       <Table2 size={13} /><span>{contextSummary}</span>
                     </span>
                   </div>
+
+                  {mode === 'report' && (
+                    <div className="report-profile">
+                      <div className="profile-select-wrap" ref={profileSelectRef}>
+                        <button
+                          type="button"
+                          className={`profile-select-trigger ${profileMenuOpen ? 'active' : ''}`}
+                          aria-haspopup="listbox"
+                          aria-expanded={profileMenuOpen}
+                          aria-label="报告指标定义"
+                          disabled={running}
+                          onClick={() => setProfileMenuOpen((v) => !v)}
+                        >
+                          <Ruler size={14} />
+                          <span>{selectedProfile ? selectedProfile.name : '通用分析'}</span>
+                          <ChevronDown size={14} />
+                        </button>
+                        {profileMenuOpen && (
+                          <div className="profile-menu" role="listbox" aria-label="报告指标定义">
+                            <div className="profile-menu-scroll">
+                              <button
+                                type="button"
+                                role="option"
+                                aria-selected={!metricProfileId}
+                                className={`profile-menu-row ${!metricProfileId ? 'active' : ''}`}
+                                onClick={() => { setMetricProfileId(null); setProfilePeek(false); setProfileMenuOpen(false); }}
+                              >
+                                通用分析<span>不套用企业口径</span>
+                              </button>
+                              {groupedProfiles.map((group) => (
+                                <section className="profile-menu-group" key={group.category}>
+                                  <h4>{group.category}</h4>
+                                  {group.items.map((profile) => (
+                                    <button
+                                      type="button"
+                                      role="option"
+                                      key={profile.id}
+                                      aria-selected={metricProfileId === profile.id}
+                                      className={`profile-menu-row ${metricProfileId === profile.id ? 'active' : ''}`}
+                                      onClick={() => { setMetricProfileId(profile.id); setProfilePeek(false); setProfileMenuOpen(false); }}
+                                    >
+                                      {profile.name}
+                                      {profile.summary && <span>{profile.summary}</span>}
+                                    </button>
+                                  ))}
+                                </section>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {selectedProfile && (
+                        <button type="button" className={`report-profile-peek ${profilePeek ? 'active' : ''}`} onClick={() => setProfilePeek((v) => !v)}>
+                          {profilePeek ? '收起口径' : '查看口径'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {mode === 'report' && profilePeek && selectedProfile && (
+                    <div className="report-profile-detail">
+                      {selectedProfile.summary && <p className="rpd-summary">{selectedProfile.summary}</p>}
+                      {selectedProfile.calibers.length > 0 && (
+                        <dl>
+                          {selectedProfile.calibers.map((caliber) => (
+                            <div key={caliber.name || caliber.definition}>
+                              <dt>{caliber.name || '口径'}</dt>
+                              <dd>{caliber.definition}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
+                      {selectedProfile.brief && <pre className="rpd-brief">{selectedProfile.brief}</pre>}
+                      <p className="rpd-foot">管理员可在「指标定义」中调整口径与要求</p>
+                    </div>
+                  )}
 
                   <textarea
                     ref={textareaRef}

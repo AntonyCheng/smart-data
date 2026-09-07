@@ -44,6 +44,7 @@ export interface AiSession {
   status: string;
   running: boolean;
   mode: SessionMode;
+  metricProfileId: string | null;
   categoryPrimary: string;
   categorySecondary: string;
   createdAt: string;
@@ -125,6 +126,37 @@ export interface Artifact {
 }
 
 /** 后端 exceljs → Univer 快照。直接喂给 univerAPI.createWorkbook。 */
+export interface MetricCaliber {
+  name: string;
+  definition: string;
+}
+
+export interface MetricProfile {
+  id: string;
+  key: string | null;
+  name: string;
+  summary: string;
+  category: string;
+  calibers: MetricCaliber[];
+  brief: string;
+  reportOutline: string | null;
+  builtin: boolean;
+  enabled: boolean;
+  sortOrder: number;
+  updatedAt: string;
+}
+
+export interface MetricProfileInput {
+  name?: string;
+  summary?: string;
+  category?: string;
+  calibers?: MetricCaliber[];
+  brief?: string;
+  reportOutline?: string | null;
+  enabled?: boolean;
+  sortOrder?: number;
+}
+
 export interface WorkbookSnapshot {
   id: string;
   name: string;
@@ -268,10 +300,17 @@ export const api = {
       fileIds: string[] = [],
       mode?: SessionMode,
       context?: { file?: string; sheet?: string; selection?: string },
+      metricProfileId?: string | null,
     ) =>
       request<{ executionId: string; status: 'accepted' }>(`/sessions/${sessionId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content, fileIds, ...(mode ? { mode } : {}), ...(context ? { context } : {}) }),
+        body: JSON.stringify({
+          content,
+          fileIds,
+          ...(mode ? { mode } : {}),
+          ...(context ? { context } : {}),
+          ...(metricProfileId !== undefined ? { metricProfileId } : {}),
+        }),
       }),
     abort: (sessionId: string) =>
       request<{ status: 'aborted' | 'idle' }>(`/sessions/${sessionId}/abort`, { method: 'POST' }),
@@ -293,6 +332,19 @@ export const api = {
     list: (sessionId: string) => request<Artifact[]>(`/sessions/${sessionId}/artifacts`),
     workbook: (id: string) => request<WorkbookSnapshot>(`/artifacts/${id}/workbook`),
     blob: (id: string) => requestBlob(`/artifacts/${id}`),
+  },
+  metricProfiles: {
+    list: (all = false) => request<MetricProfile[]>(`/metric-profiles${all ? '?all=1' : ''}`),
+    get: (id: string) => request<MetricProfile>(`/metric-profiles/${id}`),
+    create: (input: MetricProfileInput) => request<MetricProfile>('/metric-profiles', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+    update: (id: string, input: MetricProfileInput) => request<MetricProfile>(`/metric-profiles/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+    remove: (id: string) => request<{ deleted: true }>(`/metric-profiles/${id}`, { method: 'DELETE' }),
   },
   admin: {
     users: () => request<AdminUser[]>('/admin/users'),
