@@ -182,7 +182,8 @@ export interface RuntimeEvent {
 }
 
 function storage(): Storage | null {
-  return typeof window === 'undefined' ? null : window.sessionStorage;
+  // localStorage：关闭标签页 / 浏览器后仍保持登录，直到主动退出或 JWT 过期（JWT_EXPIRES_IN，默认 7 天）。
+  return typeof window === 'undefined' ? null : window.localStorage;
 }
 
 export function getAccessToken(): string | null {
