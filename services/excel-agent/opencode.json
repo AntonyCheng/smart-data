@@ -1,8 +1,21 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "my-newapi/ds4f-0731-75",
-  "small_model": "my-newapi/ds4f-0731-75",
+  "model": "deepseek/deepseek-v4-flash",
+  "small_model": "deepseek/deepseek-v4-flash",
   "provider": {
+    "deepseek": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "DeepSeek",
+      "options": {
+        "baseURL": "https://api.deepseek.com/v1",
+        "apiKey": "{env:DEEPSEEK_API_KEY}"
+      },
+      "models": {
+        "deepseek-v4-flash": {
+          "name": "DeepSeek-V4-Flash"
+        }
+      }
+    },
     "my-newapi": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "NewAPI",
@@ -11,8 +24,8 @@
         "apiKey": "{env:MODEL_API_KEY}"
       },
       "models": {
-        "ds4f-0731-75": {
-          "name": "ds4f-0731-75"
+        "ds4f-0731-71": {
+          "name": "ds4f-0731-71"
         }
       }
     }

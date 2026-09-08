@@ -28,8 +28,11 @@ services:
     environment:
       OPENCODE_SERVER_USERNAME: ${OPENCODE_USERNAME:-opencode}
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASSWORD:?请在 .env 中设置 OPENCODE_PASSWORD}
-      MODEL_BASE_URL: ${MODEL_BASE_URL:?请在 .env 中设置 MODEL_BASE_URL}
-      MODEL_API_KEY: ${MODEL_API_KEY:?请在 .env 中设置 MODEL_API_KEY}
+      # 当前生效模型：DeepSeek 官方 deepseek-v4-flash（opencode.json 里 deepseek provider）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?请在 .env 中设置 DEEPSEEK_API_KEY}
+      # 备用 provider my-newapi（默认不启用），缺省填占位即可
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-http://127.0.0.1:7136/v1}
+      MODEL_API_KEY: ${MODEL_API_KEY:-unused}
       NO_PROXY: 127.0.0.1,localhost
       no_proxy: 127.0.0.1,localhost
     volumes:

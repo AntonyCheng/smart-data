@@ -49,7 +49,7 @@ scripts/                本地开发脚本
 ## 环境要求
 
 - Linux / macOS / Windows 均可，需 **Docker Engine 24+ 与 Docker Compose v2**（`docker compose version` 能跑即可）
-- 一个可访问的 OpenAI-compatible 模型服务地址和 API Key
+- 一个 **DeepSeek 官方 API Key**（当前生效模型 `deepseek-v4-flash`，地址 `https://api.deepseek.com/v1`）。如需换回自建 OpenAI-compatible 网关，见「端口与模型配置」
 - 首次 `docker compose build` 较慢：`excel-agent` 镜像要装 LibreOffice + Python 科学库，约 **8–12 分钟**；`api` / `web` 各 1–3 分钟
 
 ## Docker Compose 部署（推荐）
@@ -65,9 +65,10 @@ git clone <仓库地址> zhishu && cd zhishu
 # 1) 准备 .env —— 必须由人工填写，Agent 无法代填（含模型密钥等机密）
 cp .env.docker.example .env
 $EDITOR .env
-#   必填：POSTGRES_PASSWORD  OPENCODE_PASSWORD  MODEL_BASE_URL  MODEL_API_KEY
+#   必填：POSTGRES_PASSWORD  OPENCODE_PASSWORD  DEEPSEEK_API_KEY
 #         JWT_SECRET（≥32 位随机串）  SEED_ADMIN_EMAIL  SEED_ADMIN_PASSWORD
-#   可选：WEB_PORT（默认 18180）  SEED_TENANT_NAME  AGENT_*_STEP_LIMIT 等
+#   可选：MODEL_BASE_URL / MODEL_API_KEY（备用 my-newapi 网关，默认不启用，留占位即可）
+#         WEB_PORT（默认 18180）  SEED_TENANT_NAME  AGENT_*_STEP_LIMIT 等
 
 # 2) 构建并启动（首次约 10~15 分钟，主要耗在 excel-agent 镜像）
 docker compose build
@@ -80,15 +81,22 @@ docker compose logs -f api        # 看到 "listening on http://127.0.0.1:3000/a
 
 打开 `http://<主机 IP>:18180`，用 `.env` 里的 `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` 登录。
 
-> **给自动化 Agent 的提示**：`.env` 不在仓库里（`.gitignore` 排除）。如果目标目录没有 `.env` 或其中还是 `change-this-*` 占位值，**不要启动**，先要求人工补全机密，再执行 `docker compose up -d`。
+> **给自动化 Agent 的提示**：`.env` 不在仓库里（`.gitignore` 排除），`git pull` 不会带来也不会覆盖它。
+> 如果目标目录没有 `.env` 或其中还是 `change-this-*` 占位值，**不要启动**，先要求人工补全机密。
+> 拉取更新后如提示缺 `DEEPSEEK_API_KEY`，让运维手动把 DeepSeek Key 追加到现有 `.env` 的 `DEEPSEEK_API_KEY=` 一行，
+> 然后 `docker compose build excel-agent && docker compose up -d`（改了 `opencode.json` 必须重建 `excel-agent`）。
 
-### Linux 上模型服务在宿主机时
+### 换回自建模型网关（可选）
 
-Linux 的 Docker 默认没有 `host.docker.internal`。若模型服务跑在宿主机：
+当前生效模型是 DeepSeek 官方（走公网，无需局域网可达）。若要改用自建 OpenAI-compatible 网关：
 
-- 用宿主机在局域网里的真实 IP：`MODEL_BASE_URL=http://192.168.x.x:<端口>/v1`，或
-- 在 `docker-compose.yml` 的 `excel-agent` 服务下加
-  `extra_hosts: ["host.docker.internal:host-gateway"]`，再用 `http://host.docker.internal:<端口>/v1`
+1. `services/excel-agent/opencode.json`：把 `model` / `small_model` 改回 `my-newapi/ds4f-0731-71`
+2. `.env`：填 `MODEL_BASE_URL` / `MODEL_API_KEY`
+3. `docker compose build excel-agent && docker compose up -d`
+
+Linux 的 Docker 默认没有 `host.docker.internal`，网关跑在宿主机时用局域网真实 IP
+（`MODEL_BASE_URL=http://192.168.x.x:<端口>/v1`），或给 `excel-agent` 加
+`extra_hosts: ["host.docker.internal:host-gateway"]`。
 
 ### 更新代码后重启
 
@@ -105,7 +113,10 @@ docker compose ps
 ### 端口与模型配置
 
 - 换 Web 端口：`.env` 里设 `WEB_PORT=8080` 之类后 `docker compose up -d`
-- OpenCode provider 与默认模型名在 `services/excel-agent/opencode.json`（当前 `my-newapi/ds4f-0731-75`）；模型地址与密钥只通过 `MODEL_BASE_URL` / `MODEL_API_KEY` 注入，不写进配置文件
+- OpenCode provider 与模型名在 `services/excel-agent/opencode.json`：当前生效 `deepseek/deepseek-v4-flash`
+  （地址 `https://api.deepseek.com/v1` 写死，非机密；Key 走 `.env` 的 `DEEPSEEK_API_KEY`）；
+  另配了备用 provider `my-newapi/ds4f-0731-71`（地址与 Key 走 `MODEL_BASE_URL` / `MODEL_API_KEY`），默认不启用
+- 改了 `opencode.json` 后必须 `docker compose build excel-agent`（该文件编译进镜像，不是挂载）
 
 ### 持久化数据
 
@@ -127,7 +138,8 @@ docker compose exec excel-agent python3 -c "import openpyxl, pandas"
 ```
 
 - `docker compose up` 报缺变量（`POSTGRES_PASSWORD is not set` 等）：`.env` 没建或没填全，见上面「从零部署」。
-- 页面显示"AI 服务未返回有效内容" / `agent.error`：同时看 `api` 和 `excel-agent` 日志，确认 `MODEL_BASE_URL` 从容器内可达（`docker compose exec excel-agent wget -qO- $MODEL_BASE_URL/models`）、API Key 有效、模型名与 `opencode.json` 一致。
+- 页面显示"AI 服务未返回有效内容" / `agent.error`：同时看 `api` 和 `excel-agent` 日志，确认 `DEEPSEEK_API_KEY` 有效、模型名与 `opencode.json` 一致、容器能出公网。容器里没有 curl/wget，用 node 自测：
+  `docker compose exec excel-agent node -e 'fetch("https://api.deepseek.com/v1/models",{headers:{Authorization:"Bearer "+process.env.DEEPSEEK_API_KEY}}).then(r=>r.json()).then(d=>console.log(JSON.stringify(d)))'`
 - 上传返回 `413`：检查前置代理请求体大小限制（内置 Web Nginx 为 `110m`）。
 - 换了机器后端口冲突：`.env` 改 `WEB_PORT`。
 - Postgres 起不来、日志有权限报错：`sudo chown -R 999:999 data/postgres`（`postgres:15` 镜像内 uid 为 999）。

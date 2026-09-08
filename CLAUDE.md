@@ -15,7 +15,7 @@ This repo was refactored from an earlier FastAPI prototype ("经分助手") onto
 ### Whole stack (Docker Compose — the primary path)
 
 ```powershell
-Copy-Item .env.docker.example .env   # fill MODEL_BASE_URL/MODEL_API_KEY/JWT_SECRET/SEED_ADMIN_*/passwords
+Copy-Item .env.docker.example .env   # fill DEEPSEEK_API_KEY/JWT_SECRET/SEED_ADMIN_*/passwords (MODEL_* optional — dormant fallback)
 docker compose build                 # excel-agent is slow (~10 min: LibreOffice + Python)
 docker compose up -d
 docker compose ps                    # all healthy
@@ -88,7 +88,7 @@ Every chat turn: `POST /sessions/:id/messages` creates an `AiMessage` + `AiExecu
 
 ### OpenCode runtime (`services/excel-agent/`)
 
-- **`opencode.json`** — model `my-newapi/ds4f-0731-75` (provider injected via `MODEL_BASE_URL`/`MODEL_API_KEY`), `skills.paths: [".opencode/skills"]`, `external_directory: deny`.
+- **`opencode.json`** — active model `deepseek/deepseek-v4-flash` (DeepSeek official, `https://api.deepseek.com/v1` hardcoded, key via `{env:DEEPSEEK_API_KEY}`); a dormant fallback provider `my-newapi/ds4f-0731-71` (OpenAI-compatible gateway, `{env:MODEL_BASE_URL}`/`{env:MODEL_API_KEY}`) stays configured — flip `model`/`small_model` back to use it. `skills.paths: [".opencode/skills"]`, `external_directory: deny`. Baked into the image → `docker compose build excel-agent` after any edit.
 - **`.opencode/agents/zhishu-assistant.md`** — the locked-down runtime agent: no subagents/web, skills denied except `huashu-excel`, bash denied except `python* / uv* / libreoffice* / pandoc*`, `edit: allow`. Two modes in the body.
 - **`.opencode/agents/chinese-output.md`** — translation-only agent used by the event watcher's Chinese-enforcement fallback.
 - **`.opencode/skills/huashu-excel/`** — **vendored**, pinned to commit `9348581a` (`.source-revision`). Do not edit in place — replace the whole directory after human review and update `.source-revision`.
