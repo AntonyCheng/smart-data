@@ -376,7 +376,7 @@ function AssistantMessage({ message, processItems }: { message: AiMessage; proce
     <article className="message-row assistant-message">
       <div className="message-avatar ai-avatar"><Sparkles size={17} /></div>
       <div className="message-body">
-        <div className="message-author">智数 AI 助手</div>
+        <div className="message-author">智数 AI 分析师</div>
         {processItems && <ProcessPanel items={processItems} running={false} />}
         <Markdown>{message.content}</Markdown>
         <div className="message-footer">
@@ -470,7 +470,7 @@ function LoginScreen({
           <div className="login-visual-brand">
             <span><Table2 size={21} /></span>
             <div>
-              <strong>智数AI助手</strong>
+              <strong>智数AI分析师</strong>
               <small>你身边的私人数据分析师</small>
             </div>
           </div>
@@ -493,7 +493,7 @@ function LoginScreen({
 
         <div className="login-panel">
           <div className="login-panel-inner">
-            <div className="login-mobile-brand"><span><Table2 size={19} /></span><strong>智数AI助手</strong></div>
+            <div className="login-mobile-brand"><span><Table2 size={19} /></span><strong>智数AI分析师</strong></div>
             <div className="login-copy">
               {mode === 'register' && <span>创建账号</span>}
               <h2>{mode === 'login' ? '欢迎回来' : '注册普通用户'}</h2>
@@ -1311,7 +1311,7 @@ export default function ZhishuApp() {
       if (process) appendProcess(process);
 
       if (event.type === 'agent.started') {
-        appendProcess({ key: 'submission', label: '问题已提交', detail: '智数 AI 助手已开始处理', status: 'done' });
+        appendProcess({ key: 'submission', label: '问题已提交', detail: '智数 AI 分析师已开始处理', status: 'done' });
         markSessionRunning(event.sessionId, true);
         setRunning(true);
         setError('');
@@ -1543,7 +1543,7 @@ export default function ZhishuApp() {
     setDraft('');
     setLiveMarkdown('');
     setCurrentProcess([]);
-    appendProcess({ key: 'submission', label: '问题已提交', detail: '等待智数 AI 助手开始分析', status: 'running' });
+    appendProcess({ key: 'submission', label: '问题已提交', detail: '等待智数 AI 分析师开始分析', status: 'running' });
     markSessionRunning(sessionId, true);
     setRunning(true);
 
@@ -1726,7 +1726,7 @@ export default function ZhishuApp() {
       <aside className={`chat-sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-brand">
           <span><Table2 size={20} /></span>
-          <div><strong>智数AI助手</strong><small>你身边的私人数据分析师</small></div>
+          <div><strong>智数AI分析师</strong><small>你身边的私人数据分析师</small></div>
           <button type="button" aria-label="关闭侧边栏" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
 
@@ -1938,7 +1938,7 @@ export default function ZhishuApp() {
                         <article className="message-row assistant-message live-message">
                           <div className="message-avatar ai-avatar"><Sparkles size={17} /></div>
                           <div className="message-body">
-                            <div className="message-author">智数 AI 助手</div>
+                            <div className="message-author">智数 AI 分析师</div>
                             <ProcessPanel items={processItems} running={running} />
                             {liveMarkdown ? <Markdown>{liveMarkdown}</Markdown> : running ? <div className="thinking-line"><i /><i /><i /></div> : null}
                           </div>

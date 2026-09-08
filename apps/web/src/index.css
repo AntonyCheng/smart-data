@@ -94,7 +94,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   isolation: isolate;
   color: #fff;
   background-color: #57121c;
-  background-image: url("/data-ai-login-hero.jpg");
+  background-image:
+    linear-gradient(157deg, rgba(111,28,40,.20) 0%, rgba(90,19,29,.12) 44%, rgba(26,7,10,.42) 100%),
+    url("/data-ai-login-hero.jpg");
   background-size: cover;
   background-position: 34% center;
   background-repeat: no-repeat;

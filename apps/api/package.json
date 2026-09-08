@@ -2,7 +2,7 @@
   "name": "@zhishu/api",
   "version": "0.1.0",
   "private": true,
-  "description": "智数AI助手 后端 — NestJS + Prisma + OpenCode 运行时网关",
+  "description": "智数AI分析师 后端 — NestJS + Prisma + OpenCode 运行时网关",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",

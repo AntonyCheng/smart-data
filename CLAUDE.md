@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-智数AI助手 (zhìshù AI zhùshǒu) — a local-first AI Excel analysis workbench for business/operations analysts. VS Code / Cursor-style split: **left = Univer spreadsheet viewer, right = AI Copilot**. Upload Excel files, then use natural language to either **operate** on them (calc / clean / dedupe / pivot / merge / split) or generate a **full analysis report** (verification / analysis / charts / HTML·DOCX·XLSX).
+智数AI分析师 (zhìshù AI fēnxīshī) — a local-first AI Excel analysis workbench for business/operations analysts. VS Code / Cursor-style split: **left = Univer spreadsheet viewer, right = AI Copilot**. Upload Excel files, then use natural language to either **operate** on them (calc / clean / dedupe / pivot / merge / split) or generate a **full analysis report** (verification / analysis / charts / HTML·DOCX·XLSX).
 
 **All real Excel analysis is delegated to the OpenCode CLI running the vendored `huashu-excel` skill.** The backend never reimplements analysis logic — this is a stated product principle.
 

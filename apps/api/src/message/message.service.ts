@@ -261,7 +261,7 @@ export class MessageService {
       mode === 'report' && metricProfile ? this.buildMetricProfileBlock(metricProfile) : '';
 
     return [
-      '你是智数助手。',
+      '你是智数AI分析师。',
       workspaceBlock,
       mode === 'report' ? REPORT_INSTRUCTIONS : OPERATE_INSTRUCTIONS,
       metricProfileBlock,
